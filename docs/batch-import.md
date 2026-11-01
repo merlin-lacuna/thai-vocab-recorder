@@ -14,7 +14,8 @@ transcripts, word lists) to the table `public.vocab_items`, so that:
 
 - the phone app shows them (it downloads the newest 500 items by `captured_at`),
 - the future drill app can use them,
-- each item gets romanization and English through the existing AI step.
+- each item has Thai text, romanization and English – **from the source data where it
+  exists**, and from the AI step (`process` function) only for the fields that are missing.
 
 Rules:
 
@@ -88,8 +89,8 @@ Network hosts needed: `*.supabase.co` and `api.supabase.com`.
 | `notes` | text | Free text, for example "Lesson 2026-10-28, 12:34–12:37" or an example sentence |
 | `audio_path` | text | `<user_id>/<id>.wav` in bucket `vocab-audio`, or null |
 | `transcription_status` | text | `done` (machine transcript), `manual` (typed or verified by a human), `pending` (audio only, not transcribed yet) |
-| `romanization`, `english`, `entry_type`, `part_of_speech` | text | Leave null: the AI step fills them. Fill them yourself only when the source has trusted values; then also set `enrichment_status = 'reviewed'`. |
-| `enrichment_status` | text | `new` (AI step will process it), `enriched` (done by AI), `reviewed` (human-checked; AI never changes it) |
+| `romanization`, `english`, `entry_type`, `part_of_speech` | text | From the source data when it has them; otherwise null (see 4.0) |
+| `enrichment_status` | text | **Controls the AI step**, see 4.0: `new` = the AI step may process the row (also the phone app processes up to 20 such rows at each sync); `enriched` = filled by a machine, AI leaves it alone; `reviewed` = checked by a human, AI never changes it |
 | `quality`, `duplicate_of` | text, uuid | `ok` by default; see 4.4 for duplicates; `junk` / `mispronounced` for bad items |
 | `tags` | text[] | Optional, for example `{lesson-2026-10-28}` – useful to find or undo one batch |
 | `deleted_at` | timestamptz | Soft delete. Leave null. |
@@ -106,6 +107,35 @@ find, check or undo it with one query.
 ---
 
 ## 4. Procedure
+
+### 4.0 Decide per item: source data or AI step
+
+Use the data you already have. Call the AI step only for what is missing. Decide once per
+batch (or per item when the source is mixed):
+
+| The source has … | Write in the upsert | `enrichment_status` | AI step (4.7) |
+|---|---|---|---|
+| Thai, romanization, English (human-made or checked) | all of them | `reviewed` | no |
+| Thai, romanization, English (machine-made, good quality) | all of them | `enriched` | no |
+| Thai + romanization, no English | Thai, romanization | `enriched` (English stays empty) **or** `new` if English is wanted | only if `new`, see note |
+| Thai only | Thai | `new` | yes (enrichment only) |
+| Audio only | `audio_path`, `transcription_status = 'pending'` | `new` | yes (transcription + enrichment) |
+
+Notes:
+
+- **Any row with `enrichment_status = 'new'` and Thai text gets processed by the AI**,
+  either by your 4.7 run or by the phone app (up to 20 rows per sync). The AI step
+  overwrites `thai` (spelling fix), `romanization`, `english`, `entry_type` and
+  `part_of_speech`. So set `enriched` or `reviewed` for every row whose values must stay.
+- **Romanization system:** the app and the AI use strict Paiboon+ (tone marks, ต = dt,
+  ป = bp, vowels ɔ ɛ ə ʉ; full rules in `ROMANIZATION_RULES` in
+  `supabase/functions/process/index.ts`). If the source uses another system, ask the user
+  whether to keep it as it is, or to let the AI replace it (then set `new`).
+- Set `transcription_status = 'manual'` for Thai text typed or verified by a human,
+  `done` for machine transcripts.
+- **Partial gaps in large numbers** (for example 2,000 rows without English): calling
+  `process` once per row is slow. Ask the user first; a batch version of the AI step
+  (many rows per Gemini request) can be added to the Edge Function for this case.
 
 ### 4.1 Prepare the items (offline, no writes)
 
@@ -159,6 +189,7 @@ Without writing anything, show the user:
 - number of items, split by context/teacher and by "with text" / "audio only",
 - the first 20 items (Thai, notes, captured_at, audio length),
 - duplicates found and what you will do with them,
+- how many rows use source values only, and how many need the AI step (and which part),
 - the estimated AI cost: ElevenLabs is billed per audio minute (only items without
   Thai text are transcribed); Gemini costs much less than 1 US cent per 100 items.
 
@@ -174,9 +205,10 @@ Wait for approval.
    `enrichment_status` for re-runs of existing IDs, unless you mean to overwrite them.
 3. Log each batch: number of rows, HTTP status. Stop at the first 4xx error and report it.
 
-### 4.7 AI step (transcription + enrichment)
+### 4.7 AI step (transcription + enrichment) – only for rows that need it
 
-Call the deployed Edge Function for each new item:
+Skip this step for rows with `enrichment_status` `enriched` or `reviewed` (see 4.0).
+For the other rows, call the deployed Edge Function per item:
 
 ```
 POST $URL/functions/v1/process
@@ -245,6 +277,7 @@ update vocab_items set deleted_at = now() where 'import-2026-11-05' = any(tags);
 
 - [ ] Sign-in works (access A); password read from an environment variable
 - [ ] Items prepared; deterministic IDs; batch tag chosen
+- [ ] Per item decided: values from the source, `enrichment_status`, AI step yes/no (4.0)
 - [ ] Audio cut to 16 kHz mono WAV with margins
 - [ ] Duplicate check done
 - [ ] Dry-run summary shown; user approved
