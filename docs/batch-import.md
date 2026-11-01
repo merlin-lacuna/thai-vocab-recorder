@@ -80,7 +80,7 @@ Network hosts needed: `*.supabase.co` and `api.supabase.com`.
 |---|---|---|
 | `id` | uuid, PK | Deterministic UUID, see 4.1 |
 | `user_id` | uuid | Set automatically with access A; with access B use `c8e00ce7-52e5-47ff-aee2-9bffc418e428` |
-| `captured_at` | timestamptz | **The real date and time** when the word was heard (for example the lesson date). Never the import time. |
+| `captured_at` | timestamptz | A date from the source if it has one (for example a lesson date or a date column). Otherwise one fixed timestamp for the whole batch; do not spend effort on it. See the note below the table. |
 | `context` | text | `field` (daily life), `wondering` (looked up out of curiosity), `lingping_club` (weekly practice group), `lesson`, `other` |
 | `teacher` | text | Only for `context = 'lesson'`: `Boom` or `Ae` (exact spelling, the app maps these) |
 | `source` | text | Name of the input, for example `lesson_recorder`, `pickup_thai`, `import_<name>`. Never `field_recorder` (that is the phone app). |
@@ -100,6 +100,12 @@ Allowed values are enforced by CHECK constraints:
 `entry_type` in (`word`, `phrase`);
 `part_of_speech` in (`noun`, `verb`, `adjective`, `adverb`, `preposition`, `article`,
 `pronoun`, `classifier`, `particle`, `conjunction`, `number`, `other`).
+
+Note on `captured_at`: the phone app shows the newest 500 items by `captured_at`. A batch
+with today's date appears at the top of the phone list. For a large batch (more than about
+200 items without a real date), ask the user whether to use an early fixed date instead
+(for example `2026-01-01T00:00:00Z`), so the imported words do not push the words recorded
+on the phone out of that list.
 
 Always add a tag for the batch (for example `import-2026-11-05`), so that the user can
 find, check or undo it with one query.
@@ -140,7 +146,7 @@ Notes:
 ### 4.1 Prepare the items (offline, no writes)
 
 1. Read the source material and build a list of items: Thai text (if known), audio segment
-   (file + start/end time, if any), date/time, context, teacher, notes.
+   (file + start/end time, if any), date (only if the source has one), context, teacher, notes.
 2. Normalize the Thai text: trim spaces, remove zero-width characters (U+200B), apply
    Unicode NFC. Do not "correct" spelling yourself; the AI step does that and keeps the
    original in `thai_alternatives`.
