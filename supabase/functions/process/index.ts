@@ -17,7 +17,8 @@
 //   GEMINI_API_KEY         required for step 2 (step 2 is skipped without it)
 // Optional:
 //   ELEVENLABS_STT_MODEL   default "scribe_v1"
-//   GEMINI_MODEL           default "gemini-flash-latest"
+//   GEMINI_MODELS          comma-separated models to try in order, default
+//                          "gemini-3.8-flash,gemini-flash-latest,gemini-flash-lite-latest"
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 
@@ -53,6 +54,7 @@ async function transcribe(supabase: SupabaseClient, audioPath: string): Promise<
     method: "POST",
     headers: { "xi-api-key": apiKey },
     body: form,
+    signal: AbortSignal.timeout(45_000),
   });
   const body = await res.text();
   if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${body.slice(0, 300)}`);
@@ -67,9 +69,40 @@ interface Enrichment {
   part_of_speech: string | null;
 }
 
+/**
+ * Problem with one model (busy, rate limit, timeout, model retired): try the next model.
+ * If all models fail this way, try again at the next sync and save no error.
+ */
+class TemporaryError extends Error {}
+class BadRequestError extends Error {}
+
+const GEMINI_MODELS = (Deno.env.get("GEMINI_MODELS") ??
+  "gemini-3.8-flash,gemini-flash-latest,gemini-flash-lite-latest").split(",").map((m) => m.trim());
+
+/** Tries each model in turn while the error is temporary. */
 async function enrich(thai: string, notes: string | null): Promise<Enrichment> {
+  let last: unknown;
+  for (const model of GEMINI_MODELS) {
+    try {
+      try {
+        return await enrichWith(model, thai, notes, true);
+      } catch (e) {
+        // Some models reject the "thinking" setting: try once more without it.
+        if (e instanceof BadRequestError) return await enrichWith(model, thai, notes, false);
+        throw e;
+      }
+    } catch (e) {
+      last = e;
+      if (!(e instanceof TemporaryError)) throw e;
+    }
+  }
+  throw last;
+}
+
+async function enrichWith(
+  model: string, thai: string, notes: string | null, noThinking: boolean,
+): Promise<Enrichment> {
   const apiKey = Deno.env.get("GEMINI_API_KEY")!;
-  const model = Deno.env.get("GEMINI_MODEL") ?? "gemini-flash-latest";
 
   const prompt = `You help an English speaker who learns Thai. They heard a Thai word or phrase
 in daily life and recorded it. Speech recognition produced this text, which can be
@@ -86,15 +119,20 @@ Return:
 - entry_type: "word" for a single word (including compound words), else "phrase".
 - part_of_speech: for a word, one of ${PARTS_OF_SPEECH.join(", ")}; for a phrase, null.`;
 
-  const res = await fetch(
+  let res: Response;
+  try {
+  res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
     {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.2,
+          // A short dictionary-style answer needs no "thinking"; this keeps it fast.
+          ...(noThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
           responseMimeType: "application/json",
           responseSchema: {
             type: "OBJECT",
@@ -111,8 +149,17 @@ Return:
       }),
     },
   );
+  } catch (e) {
+    throw new TemporaryError(`Gemini ${model}: ${e}`); // timeout or network
+  }
   const body = await res.text();
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${body.slice(0, 300)}`);
+  if (res.status === 400 && noThinking) {
+    throw new BadRequestError(`Gemini ${model} 400: ${body.slice(0, 200)}`);
+  }
+  if (res.status === 429 || res.status === 404 || res.status >= 500) {
+    throw new TemporaryError(`Gemini ${model} ${res.status}: ${body.slice(0, 200)}`);
+  }
+  if (!res.ok) throw new Error(`Gemini ${model} ${res.status}: ${body.slice(0, 300)}`);
   const text = JSON.parse(body).candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error(`Gemini returned no result: ${body.slice(0, 300)}`);
   const result = JSON.parse(text) as Enrichment;
@@ -182,7 +229,9 @@ Deno.serve(async (req) => {
         enrichment_error: null,
       });
     } catch (e) {
-      update.enrichment_error = String(e).slice(0, 300);
+      // Temporary problems are retried at the next sync; others are saved and shown.
+      if (!(e instanceof TemporaryError)) update.enrichment_error = String(e).slice(0, 300);
+      else console.warn(String(e));
     }
   }
 
