@@ -27,7 +27,7 @@ database later.
 | Part | Location | Purpose |
 |---|---|---|
 | Android app | `app/` | Kotlin + Jetpack Compose. Works offline; uploads when the phone has a network connection. |
-| Database schema | `supabase/schema.sql` | Tables, security rules and audio storage for Supabase (hosted PostgreSQL). |
+| Database schema | `supabase/migrations/` | Tables, security rules and audio storage for Supabase (hosted PostgreSQL). One SQL file per change, applied in name order. |
 | Build | `.github/workflows/build.yml` | GitHub Actions builds the APK on every push. |
 
 ## Set-up (one time, about 10 minutes)
@@ -36,8 +36,14 @@ database later.
 
 1. Create a free account and a new project at <https://supabase.com>.
    Choose a region near you (for example Singapore).
-2. In the project, open **SQL Editor → New query**, paste the full content of
-   `supabase/schema.sql`, and click **Run**.
+2. Create the tables. Use **one** of these two ways:
+   * **Automatic (GitHub integration):** in Supabase, open
+     **Project Settings → Integrations → GitHub**, connect this repository, set the
+     Supabase directory to `supabase`, and switch on **Deploy to production** for the
+     branch `main`. When this code is merged into `main`, Supabase runs the files in
+     `supabase/migrations/`. Later database changes arrive the same way.
+   * **Manual:** open **SQL Editor → New query**, paste the content of each file in
+     `supabase/migrations/` (oldest first), and click **Run**.
 3. Open **Authentication → Users → Add user → Create new user**.
    Enter your email and a password, and select **Auto Confirm User**.
    The app (and later the drill app) signs in with this account.
@@ -82,7 +88,7 @@ The app stores only a login token; the password is not saved.
 
 ## The database, for other apps
 
-Table `vocab_items` (see `supabase/schema.sql` for all columns). The numbers refer
+Table `vocab_items` (see `supabase/migrations/` for all columns). The numbers refer
 to the hand-written specification (171.0 – 171.11).
 
 | Column | Spec | Filled by | Content |

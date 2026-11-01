@@ -1,7 +1,11 @@
--- Thai vocabulary database (Supabase / PostgreSQL)
+-- Thai vocabulary database (Supabase / PostgreSQL) - first version of the schema.
 --
--- Run this whole file once in the Supabase dashboard: SQL Editor -> New query -> Run.
--- It is safe to run again: it only creates what is missing.
+-- Supabase applies the files in supabase/migrations/ automatically, in name order,
+-- through the GitHub integration (when the branch is merged into the production branch).
+-- Manual alternative: paste this file into the Supabase SQL Editor and click Run.
+--
+-- For later changes, add a NEW file in supabase/migrations/ (for example
+-- 20261215090000_add_drill_columns.sql). Do not edit a file that was already applied.
 --
 -- Design:
 --   * vocab_items is the shared table. Every input source (the field recorder app,

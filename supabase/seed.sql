@@ -1,0 +1,1 @@
+-- Test data for local development and Supabase preview branches. Empty on purpose.
