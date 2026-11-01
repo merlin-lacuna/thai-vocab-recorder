@@ -61,6 +61,20 @@ create table if not exists public.vocab_items (
 create index if not exists vocab_items_user_captured_idx on public.vocab_items (user_id, captured_at desc);
 create index if not exists vocab_items_enrichment_idx on public.vocab_items (enrichment_status) where deleted_at is null;
 
+-- Keep updated_at correct when a row is changed by any app or by hand in the dashboard.
+create or replace function public.set_updated_at() returns trigger
+language plpgsql as $$
+begin
+    new.updated_at := now();
+    return new;
+end;
+$$;
+
+drop trigger if exists vocab_items_set_updated_at on public.vocab_items;
+create trigger vocab_items_set_updated_at
+    before update on public.vocab_items
+    for each row execute function public.set_updated_at();
+
 -- One row each time the drill app asks a question.
 create table if not exists public.quiz_events (
     id              uuid primary key default gen_random_uuid(),
