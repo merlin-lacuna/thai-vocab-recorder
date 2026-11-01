@@ -2,6 +2,7 @@ package app.thaivocab.recorder.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
+import app.thaivocab.recorder.data.CaptureContext
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 
@@ -22,20 +23,22 @@ object SampleData {
         transcription: Transcription = Transcription.DONE,
         dirty: Boolean = false,
         audio: Boolean = true,
+        context: CaptureContext = CaptureContext.FIELD,
     ) = VocabEntry(
         id = id, thai = thai, alternatives = alternatives, notes = notes,
         audioFile = if (audio) "/sample/$id.wav" else null,
         capturedAt = NOW - minutesAgo * MIN, updatedAt = NOW - minutesAgo * MIN,
         transcription = transcription, dirty = dirty, audioUploaded = !dirty, deleted = false,
+        context = context,
     )
 
     val entries = listOf(
         entry("1", null, minutesAgo = 0, transcription = Transcription.PENDING, dirty = true),
         entry("2", "ตลาดน้ำ", listOf("ตลาด น้ำ", "ตลาดนัด"), notes = "floating market – boat driver", minutesAgo = 4, dirty = true),
-        entry("3", "ขอบคุณครับ", minutesAgo = 35),
+        entry("3", "ขอบคุณครับ", minutesAgo = 35, context = CaptureContext.LINGPING),
         entry("4", null, minutesAgo = 80, transcription = Transcription.FAILED),
         entry("5", "ห้ามจอดรถ", notes = "sign on the gate", minutesAgo = 120, transcription = Transcription.MANUAL, audio = false),
-        entry("6", "อร่อยมาก", listOf("อร่อย มาก"), minutesAgo = 300),
+        entry("6", "อร่อยมาก", listOf("อร่อย มาก"), minutesAgo = 300, context = CaptureContext.KRU_BOOM),
     )
 }
 
@@ -54,7 +57,10 @@ fun PreviewListDark() = ThaiVocabTheme(darkTheme = true) {
 @Preview(name = "Recording", showBackground = true, heightDp = 780, widthDp = 412)
 @Composable
 fun PreviewRecording() = ThaiVocabTheme(darkTheme = false) {
-    MainContent(entries = SampleData.entries.drop(1), recording = true, message = null, connected = true, syncError = null)
+    MainContent(
+        entries = SampleData.entries.drop(1), recording = true, message = null, connected = true, syncError = null,
+        captureContext = CaptureContext.KRU_AE,
+    )
 }
 
 @Preview(name = "First start", showBackground = true, heightDp = 780, widthDp = 412)

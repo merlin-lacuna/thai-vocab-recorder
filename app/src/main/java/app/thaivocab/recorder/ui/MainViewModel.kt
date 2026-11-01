@@ -5,6 +5,8 @@ import android.media.MediaPlayer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.thaivocab.recorder.audio.WavRecorder
+import app.thaivocab.recorder.data.CaptureContext
+import app.thaivocab.recorder.data.ContextSetting
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.data.VocabStore
@@ -27,6 +29,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val config = SupabaseConfig.get(app)
     private val recorder = WavRecorder()
     private val transcriber = ThaiTranscriber(app)
+    private val contextSetting = ContextSetting(app)
+    val captureContext: StateFlow<CaptureContext> = contextSetting.current
     private var player: MediaPlayer? = null
 
     val entries: StateFlow<List<VocabEntry>> = store.entries
@@ -49,6 +53,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .forEach { store.update(it.copy(transcription = Transcription.FAILED)) }
         SyncWorker.schedule(app)
     }
+
+    fun setContext(value: CaptureContext) = contextSetting.set(value)
+
+    fun recheckContext() = contextSetting.recheck()
 
     fun startRecording() {
         if (recorder.isRecording) return
@@ -85,8 +93,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             id = id, thai = null, alternatives = emptyList(), notes = null,
             audioFile = file.absolutePath, capturedAt = now, updatedAt = now,
             transcription = Transcription.PENDING, dirty = true, audioUploaded = false, deleted = false,
+            context = contextSetting.current.value,
         )
         store.insert(entry)
+        contextSetting.touch()
 
         viewModelScope.launch {
             val results = transcriber.transcribe(file)
@@ -113,8 +123,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 id = UUID.randomUUID().toString(), thai = thai.trim(), alternatives = emptyList(),
                 notes = notes?.trim()?.ifEmpty { null }, audioFile = null, capturedAt = now, updatedAt = now,
                 transcription = Transcription.MANUAL, dirty = true, audioUploaded = false, deleted = false,
+                context = contextSetting.current.value,
             )
         )
+        contextSetting.touch()
         SyncWorker.schedule(getApplication())
     }
 

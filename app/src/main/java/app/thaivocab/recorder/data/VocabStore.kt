@@ -11,6 +11,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import java.io.File
 
+/**
+ * Where the word was heard. FIELD (cafe, taxi, daily life) is the default.
+ * Lessons store the teacher's name.
+ */
+enum class CaptureContext(val dbValue: String, val label: String, val teacher: String?) {
+    FIELD("field", "Field work", null),
+    LINGPING("lingping_club", "Lingping", null),
+    KRU_BOOM("lesson", "Kru Boom", "Boom"),
+    KRU_AE("lesson", "Kru Ae", "Ae");
+
+    val isLesson: Boolean get() = teacher != null
+}
+
 /** How far the Thai speech-to-text step has come for one entry. */
 enum class Transcription { PENDING, DONE, FAILED, MANUAL }
 
@@ -29,6 +42,7 @@ data class VocabEntry(
     val audioFile: String?,
     val capturedAt: Long,
     val updatedAt: Long,
+    val context: CaptureContext = CaptureContext.FIELD,
     val transcription: Transcription,
     /** True when the local version has changes that are not in the cloud yet. */
     val dirty: Boolean,
@@ -38,7 +52,7 @@ data class VocabEntry(
 
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 1) {
+    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 2) {
 
     private val _entries = MutableStateFlow<List<VocabEntry>>(emptyList())
 
@@ -63,13 +77,16 @@ class VocabStore private constructor(context: Context) :
                 transcription TEXT NOT NULL,
                 dirty INTEGER NOT NULL DEFAULT 1,
                 audio_uploaded INTEGER NOT NULL DEFAULT 0,
-                deleted INTEGER NOT NULL DEFAULT 0
+                deleted INTEGER NOT NULL DEFAULT 0,
+                context TEXT NOT NULL DEFAULT 'FIELD'
             )
             """.trimIndent()
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) db.execSQL("ALTER TABLE entries ADD COLUMN context TEXT NOT NULL DEFAULT 'FIELD'")
+    }
 
     @Synchronized
     fun insert(entry: VocabEntry) {
@@ -148,6 +165,7 @@ class VocabStore private constructor(context: Context) :
         put("dirty", if (dirty) 1 else 0)
         put("audio_uploaded", if (audioUploaded) 1 else 0)
         put("deleted", if (deleted) 1 else 0)
+        put("context", context.name)
     }
 
     private fun Cursor.toEntry(): VocabEntry {
@@ -166,6 +184,7 @@ class VocabStore private constructor(context: Context) :
             dirty = long("dirty") == 1L,
             audioUploaded = long("audio_uploaded") == 1L,
             deleted = long("deleted") == 1L,
+            context = runCatching { CaptureContext.valueOf(str("context")!!) }.getOrDefault(CaptureContext.FIELD),
         )
     }
 

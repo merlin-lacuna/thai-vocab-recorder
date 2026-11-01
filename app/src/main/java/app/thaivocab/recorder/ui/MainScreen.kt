@@ -68,6 +68,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import app.thaivocab.recorder.data.CaptureContext
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 import kotlinx.coroutines.delay
@@ -81,6 +88,12 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val recording by vm.recording.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val supabase by vm.supabase.collectAsStateWithLifecycle()
+    val captureContext by vm.captureContext.collectAsStateWithLifecycle()
+
+    LifecycleResumeEffect(Unit) {
+        vm.recheckContext()
+        onPauseOrDispose { }
+    }
 
     var editing by remember { mutableStateOf<VocabEntry?>(null) }
     var typing by remember { mutableStateOf(false) }
@@ -97,6 +110,8 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         message = message,
         connected = supabase.connected,
         syncError = supabase.lastError,
+        captureContext = captureContext,
+        onContextChange = vm::setContext,
         onSyncBarClick = { showSetup = true },
         onEntryClick = { editing = it },
         onPlay = vm::play,
@@ -138,6 +153,8 @@ fun MainContent(
     message: String?,
     connected: Boolean,
     syncError: String?,
+    captureContext: CaptureContext = CaptureContext.FIELD,
+    onContextChange: (CaptureContext) -> Unit = {},
     onSyncBarClick: () -> Unit = {},
     onEntryClick: (VocabEntry) -> Unit = {},
     onPlay: (VocabEntry) -> Unit = {},
@@ -160,6 +177,7 @@ fun MainContent(
                 error = syncError,
                 onClick = onSyncBarClick,
             )
+            ContextBar(selected = captureContext, onSelect = onContextChange)
             HorizontalDivider()
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -208,6 +226,29 @@ fun MainContent(
                     )
                 }
             }
+        }
+    }
+}
+
+/** Field work (default), Lingping club, or a lesson with a teacher. */
+@Composable
+private fun ContextBar(selected: CaptureContext, onSelect: (CaptureContext) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        CaptureContext.entries.forEach { c ->
+            FilterChip(
+                selected = c == selected,
+                onClick = { onSelect(c) },
+                label = { Text(c.label) },
+                leadingIcon = if (c.isLesson) {
+                    { Icon(Icons.Filled.School, contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) }
+                } else null,
+            )
         }
     }
 }
@@ -266,7 +307,8 @@ private fun EntryRow(entry: VocabEntry, onPlay: () -> Unit, onClick: () -> Unit)
             entry.notes?.let { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 2) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    timeFormat.format(Date(entry.capturedAt)),
+                    timeFormat.format(Date(entry.capturedAt)) +
+                        if (entry.context != CaptureContext.FIELD) " · ${entry.context.label}" else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

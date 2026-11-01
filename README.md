@@ -10,6 +10,7 @@ database later.
 ```
  ┌──────────────────────────────┐
  │ ☁ All saved to database      │  ← tap here once to connect the database
+ │ [Field work] Lingping 🎓Boom 🎓Ae │  ← where you are (lesson = teacher)
  ├──────────────────────────────┤
  │ ตลาดน้ำ                    ▶ │  ← tap a row to correct the text or add a note
  │ ตลาดนํ้า · ตลาด น้ำ          │     (other recognition candidates)
@@ -66,6 +67,9 @@ The app stores only a login token; the password is not saved.
 
 * **Capture:** the microphone records 16 kHz mono WAV while you hold the button
   (maximum 60 seconds). Clips shorter than 0.4 seconds are ignored.
+* **Context:** the buttons at the top select where you are: *Field work* (default),
+  *Lingping* (club), or a lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
+  each entry. It returns to *Field work* after 4 hours without a recording.
 * **Thai text:** after you release the button, the clip goes to the Android speech
   recogniser with the language `th-TH`. The best result becomes the Thai text; up to
   four other results are kept as alternatives. If recognition fails (for example,
@@ -78,25 +82,34 @@ The app stores only a login token; the password is not saved.
 
 ## The database, for other apps
 
-Table `vocab_items` (see `supabase/schema.sql` for all columns):
+Table `vocab_items` (see `supabase/schema.sql` for all columns). The numbers refer
+to the hand-written specification (171.0 – 171.11).
 
-| Column | Filled by | Content |
-|---|---|---|
-| `id` | input app | UUID, created on the phone |
-| `thai`, `thai_alternatives` | recorder | Thai script from speech recognition, or typed |
-| `notes` | recorder | free text |
-| `audio_path` | recorder | `<user id>/<item id>.wav` in the Storage bucket `vocab-audio` |
-| `meaning`, `romanization`, `part_of_speech`, `example`, `tags` | later | for an enrichment step (by hand or an AI job) |
-| `source` | each input app | `field_recorder`, `import`, … |
-| `transcription_status` | recorder | `pending`, `done`, `failed`, `manual` |
-| `enrichment_status` | enrichment step | `new` → `enriched` → `reviewed` |
-| `captured_at`, `updated_at`, `deleted_at` | input app | times (UTC) |
+| Column | Spec | Filled by | Content |
+|---|---|---|---|
+| `id` | 11 | input app | UUID, created on the phone |
+| `captured_at` | 1 | input app | date and time (UTC) |
+| `context`, `teacher` | 0 | recorder | `field` (default), `lingping_club`, or `lesson` with teacher `Boom` / `Ae` |
+| `source` | 140 | each input app | `field_recorder`, later `lesson_recorder`, `pickup_thai`, … |
+| `thai`, `thai_alternatives` | 2 | recorder | Thai script from speech recognition, or typed |
+| `audio_path` | 7 | recorder | original recording in the Storage bucket `vocab-audio` (always kept) |
+| `notes` | – | recorder | free text |
+| `romanization` | 3 | later | |
+| `english` | 4 | later | |
+| `entry_type` | 5 | later | `word` or `phrase` |
+| `part_of_speech` | 6 | later | `noun`, `verb`, `adjective`, `preposition`, `article`, `classifier`, `particle`, … |
+| `tts_audio_path` | 8 | later | computer voice (text-to-speech) for the drill app |
+| `quality`, `duplicate_of` | 172, 173 | admin | `ok`, `junk`, `mispronounced`, `duplicate` |
+| `transcription_status` | – | recorder | `pending`, `done`, `failed`, `manual` |
+| `enrichment_status` | – | enrichment step | `new` → `enriched` → `reviewed` |
+| `updated_at`, `deleted_at` | – | input app | `deleted_at` is set when you delete on the phone |
 
-Table `review_state` is prepared for the drill app: one row per item with the
-spaced-repetition values (`due_at`, `interval_days`, `ease`, `repetitions`, `lapses`).
-The recorder never writes to it.
+Table `quiz_events` (spec 9 and 10) is for the drill app: one row each time a
+question is asked, with `asked_at`, `answered_at` and `correct`. The recorder never
+writes to it. The view `vocab_stats` gives `times_asked` and `times_correct` per item,
+and the view `quiz_weekly` gives the results per week.
 
-View `vocab_active` contains only the items where `deleted_at` is empty.
+View `vocab_active` contains only the items that are not deleted and have `quality = 'ok'`.
 
 Other apps can use the database with any Supabase client library
 (JavaScript, Python, Dart/Flutter, Kotlin, Swift) or with plain HTTP (REST API).
