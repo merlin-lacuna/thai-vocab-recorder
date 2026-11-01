@@ -65,7 +65,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun recheckContext() = contextSetting.recheck()
 
+    private var pressedAt = 0L
+    private var tailJob: Job? = null
+
     fun startRecording() {
+        // A new press during the 0.5 s tail of the previous clip: finish that clip first.
+        tailJob?.let { it.cancel(); tailJob = null; finishRecording() }
         if (recorder.isRecording) return
         val id = UUID.randomUUID().toString()
         val file = File(getApplication<Application>().filesDir, "audio/$id.wav")
@@ -81,23 +86,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         currentId = id
         currentFile = file
+        pressedAt = System.currentTimeMillis()
         _recording.value = true
     }
 
+    /**
+     * Called when the button is released. A very short press is discarded. Otherwise the
+     * recorder continues for [TAIL_MS], because people often release the button while they
+     * say the last sound (for example an unreleased final -t, -p or -k in Thai).
+     */
     fun stopRecording() {
+        if (!recorder.isRecording || tailJob != null) return
+        if (System.currentTimeMillis() - pressedAt < MIN_DURATION_MS) {
+            recorder.stop()
+            _recording.value = false
+            currentFile?.delete()
+            currentId = null
+            currentFile = null
+            showMessage("Hold the button while you speak")
+            return
+        }
+        tailJob = viewModelScope.launch {
+            delay(TAIL_MS)
+            tailJob = null
+            finishRecording()
+        }
+    }
+
+    private fun finishRecording() {
         if (!recorder.isRecording) return
-        val duration = recorder.stop()
+        recorder.stop()
         _recording.value = false
         val id = currentId ?: return
         val file = currentFile ?: return
         currentId = null
         currentFile = null
-
-        if (duration < MIN_DURATION_MS) {
-            file.delete()
-            showMessage("Hold the button while you speak")
-            return
-        }
 
         val now = System.currentTimeMillis()
         val entry = VocabEntry(
@@ -238,6 +261,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MIN_DURATION_MS = 400L
+        const val TAIL_MS = 500L
         const val MAX_LEVELS = 60
     }
 }
