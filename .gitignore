@@ -9,3 +9,5 @@ captures/
 app/src/test/snapshots/
 supabase/.temp/
 supabase/.branches/
+# Local secrets written by `elevenlabs onboard`
+/.env.local
