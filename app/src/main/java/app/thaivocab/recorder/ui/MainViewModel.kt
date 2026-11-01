@@ -10,12 +10,13 @@ import app.thaivocab.recorder.data.ContextSetting
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.data.VocabStore
-import app.thaivocab.recorder.speech.ThaiTranscriber
 import app.thaivocab.recorder.sync.SupabaseApi
 import app.thaivocab.recorder.sync.SupabaseConfig
 import app.thaivocab.recorder.sync.SyncWorker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,7 +29,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = VocabStore.get(app)
     private val config = SupabaseConfig.get(app)
     private val recorder = WavRecorder()
-    private val transcriber = ThaiTranscriber(app)
     private val contextSetting = ContextSetting(app)
     val captureContext: StateFlow<CaptureContext> = contextSetting.current
     private var player: MediaPlayer? = null
@@ -39,6 +39,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _recording = MutableStateFlow(false)
     val recording: StateFlow<Boolean> = _recording.asStateFlow()
 
+    /** Recent loudness values (0..1), newest last, for the waveform while recording. */
+    private val _levels = MutableStateFlow<List<Float>>(emptyList())
+    val levels: StateFlow<List<Float>> = _levels.asStateFlow()
+
+    /** The entry whose audio is playing, and how far it has played (0..1). */
+    private val _playingId = MutableStateFlow<String?>(null)
+    val playingId: StateFlow<String?> = _playingId.asStateFlow()
+    private val _playProgress = MutableStateFlow(0f)
+    val playProgress: StateFlow<Float> = _playProgress.asStateFlow()
+    private var progressJob: Job? = null
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
@@ -46,11 +57,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var currentFile: File? = null
 
     init {
-        // Entries left in PENDING (for example the app was closed during recognition).
-        val stale = System.currentTimeMillis() - 60_000
-        store.entries.value
-            .filter { it.transcription == Transcription.PENDING && it.capturedAt < stale }
-            .forEach { store.update(it.copy(transcription = Transcription.FAILED)) }
+        // Uploads and transcribes anything that is still waiting.
         SyncWorker.schedule(app)
     }
 
@@ -63,7 +70,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val id = UUID.randomUUID().toString()
         val file = File(getApplication<Application>().filesDir, "audio/$id.wav")
         try {
-            recorder.start(file)
+            stopPlayback()
+            _levels.value = emptyList()
+            recorder.start(file) { level ->
+                _levels.value = (_levels.value + level).takeLast(MAX_LEVELS)
+            }
         } catch (e: Exception) {
             showMessage("Microphone error: ${e.message}")
             return
@@ -97,38 +108,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
         store.insert(entry)
         contextSetting.touch()
-
-        transcribe(id, file)
+        // The sync job uploads the clip and gets the Thai text from ElevenLabs.
+        SyncWorker.schedule(getApplication())
     }
 
     /** Runs speech recognition again, for an entry where it failed. */
     fun retryTranscription(entry: VocabEntry) {
-        val file = entry.audioFile?.let { File(it) }
-        if (file == null || !file.exists()) return showMessage("Audio file is missing")
+        if (entry.audioFile == null) return
         store.update(entry.copy(transcription = Transcription.PENDING, transcriptionError = null))
-        transcribe(entry.id, file)
-    }
-
-    private fun transcribe(id: String, file: File) {
-        viewModelScope.launch {
-            val outcome = transcriber.transcribe(file)
-            val results = outcome.texts
-            val latest = store.get(id) ?: return@launch
-            if (latest.deleted) return@launch
-            // If the user typed a text while recognition ran, keep their text.
-            val updated = if (latest.transcription == Transcription.MANUAL) {
-                latest.copy(alternatives = results)
-            } else if (results.isEmpty()) {
-                latest.copy(transcription = Transcription.FAILED, transcriptionError = outcome.error)
-            } else {
-                latest.copy(
-                    thai = results.first(), alternatives = results.drop(1),
-                    transcription = Transcription.DONE, transcriptionError = null,
-                )
-            }
-            store.update(updated)
-            SyncWorker.schedule(getApplication())
-        }
+        SyncWorker.schedule(getApplication())
     }
 
     /** Adds an entry without audio (for example a word read on a sign). */
@@ -166,16 +154,42 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         SyncWorker.schedule(getApplication())
     }
 
+    /** Plays the clip, or stops it when it is already playing. */
     fun play(entry: VocabEntry) {
+        if (_playingId.value == entry.id) return stopPlayback()
         val path = entry.audioFile ?: return
         if (!File(path).exists()) return showMessage("Audio file is missing")
-        player?.release()
-        player = MediaPlayer().apply {
-            setDataSource(path)
-            setOnCompletionListener { it.release(); if (player === it) player = null }
-            prepare()
-            start()
+        stopPlayback()
+        val mp = try {
+            MediaPlayer().apply {
+                setDataSource(path)
+                prepare()
+                start()
+            }
+        } catch (e: Exception) {
+            return showMessage("Cannot play: ${e.message}")
         }
+        mp.setOnCompletionListener { if (player === it) stopPlayback() }
+        player = mp
+        _playingId.value = entry.id
+        _playProgress.value = 0f
+        progressJob = viewModelScope.launch {
+            while (isActive) {
+                val p = player ?: break
+                val duration = p.duration.coerceAtLeast(1)
+                _playProgress.value = (p.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+                delay(40)
+            }
+        }
+    }
+
+    private fun stopPlayback() {
+        progressJob?.cancel()
+        progressJob = null
+        player?.release()
+        player = null
+        _playingId.value = null
+        _playProgress.value = 0f
     }
 
     fun syncNow() = SyncWorker.schedule(getApplication())
@@ -219,10 +233,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         recorder.stop()
-        player?.release()
+        stopPlayback()
     }
 
     private companion object {
         const val MIN_DURATION_MS = 400L
+        const val MAX_LEVELS = 60
     }
 }

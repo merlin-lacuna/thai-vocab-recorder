@@ -105,6 +105,13 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         )
     }
 
+    /** Calls the "transcribe" Edge Function, which returns {"text": "..."} for a stored clip. */
+    fun transcribe(token: String, audioPath: String): String {
+        val body = JSONObject().put("audio_path", audioPath).toString().toByteArray()
+        val json = JSONObject(request("POST", "/functions/v1/transcribe", token, "application/json", body))
+        return json.optString("text", "")
+    }
+
     private fun request(
         method: String,
         path: String,

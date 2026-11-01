@@ -46,7 +46,10 @@ object SampleData {
 @Preview(name = "List", showBackground = true, heightDp = 780, widthDp = 412)
 @Composable
 fun PreviewList() = ThaiVocabTheme(darkTheme = false) {
-    MainContent(entries = SampleData.entries, recording = false, message = null, connected = true, syncError = null)
+    MainContent(
+        entries = SampleData.entries, recording = false, message = null, connected = true, syncError = null,
+        playingId = "2", playProgress = { 0.6f },
+    )
 }
 
 @Preview(name = "List – dark", showBackground = true, heightDp = 780, widthDp = 412)
@@ -61,6 +64,8 @@ fun PreviewRecording() = ThaiVocabTheme(darkTheme = false) {
     MainContent(
         entries = SampleData.entries.drop(1), recording = true, message = null, connected = true, syncError = null,
         captureContext = CaptureContext.KRU_AE,
+        levels = List(60) { i -> if (i < 15) 0f else (0.05f + 0.6f * kotlin.math.abs(kotlin.math.sin(i / 3.0)).toFloat()) },
+        playingId = null,
     )
 }
 

@@ -76,10 +76,13 @@ The app stores only a login token; the password is not saved.
 * **Context:** the buttons at the top select where you are: *Field work* (default),
   *Lingping* (club), or a lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
   each entry. It returns to *Field work* after 4 hours without a recording.
-* **Thai text:** after you release the button, the clip goes to the Android speech
-  recogniser with the language `th-TH`. The best result becomes the Thai text; up to
-  four other results are kept as alternatives. If recognition fails (for example,
-  no network), the entry keeps the audio and shows *(no text – tap to type)*.
+* **Thai text:** after upload, the app calls the Supabase Edge Function `transcribe`
+  (`supabase/functions/transcribe/`). The function sends the clip to the ElevenLabs
+  speech-to-text API (language Thai) and returns the text. The ElevenLabs key is stored
+  only in Supabase (**Edge Functions → Secrets → `ELEVENLABS_API_KEY`**). If it fails,
+  the entry shows the reason and a **Try recognition again** button. The audio is always kept.
+* **Waveform and playback:** bars show the microphone level while you record. During
+  playback, a ring around the play button shows the progress; tap again to stop.
 * **Offline first:** each entry is first saved in a local SQLite database on the phone.
   A background job (Android WorkManager) uploads the entries when a network is available
   and retries automatically after an error.

@@ -7,3 +7,5 @@ local.properties
 captures/
 .kotlin/
 app/src/test/snapshots/
+supabase/.temp/
+supabase/.branches/

@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -74,6 +75,10 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.compose.foundation.Canvas
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import app.thaivocab.recorder.data.CaptureContext
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
@@ -89,6 +94,9 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val message by vm.message.collectAsStateWithLifecycle()
     val supabase by vm.supabase.collectAsStateWithLifecycle()
     val captureContext by vm.captureContext.collectAsStateWithLifecycle()
+    val levels by vm.levels.collectAsStateWithLifecycle()
+    val playingId by vm.playingId.collectAsStateWithLifecycle()
+    val playProgress = vm.playProgress.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
@@ -112,6 +120,9 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         syncError = supabase.lastError,
         captureContext = captureContext,
         onContextChange = vm::setContext,
+        levels = levels,
+        playingId = playingId,
+        playProgress = { playProgress.value },
         onSyncBarClick = { showSetup = true },
         onEntryClick = { editing = it },
         onPlay = vm::play,
@@ -156,6 +167,9 @@ fun MainContent(
     syncError: String?,
     captureContext: CaptureContext = CaptureContext.FIELD,
     onContextChange: (CaptureContext) -> Unit = {},
+    levels: List<Float> = emptyList(),
+    playingId: String? = null,
+    playProgress: () -> Float = { 0f },
     onSyncBarClick: () -> Unit = {},
     onEntryClick: (VocabEntry) -> Unit = {},
     onPlay: (VocabEntry) -> Unit = {},
@@ -192,9 +206,32 @@ fun MainContent(
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(entries, key = { it.id }) { entry ->
-                            EntryRow(entry, onPlay = { onPlay(entry) }, onClick = { onEntryClick(entry) })
+                            EntryRow(
+                                entry,
+                                playing = entry.id == playingId,
+                                playProgress = playProgress,
+                                onPlay = { onPlay(entry) },
+                                onClick = { onEntryClick(entry) },
+                            )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         }
+                    }
+                }
+            }
+
+            // Waveform while recording; otherwise space for short messages.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (recording) {
+                    Waveform(levels, Modifier.fillMaxSize())
+                } else {
+                    message?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
@@ -202,7 +239,7 @@ fun MainContent(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 28.dp),
+                    .padding(bottom = 28.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 RecordButton(
@@ -217,14 +254,6 @@ fun MainContent(
                     modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp).size(56.dp),
                 ) {
                     Icon(Icons.Filled.Keyboard, contentDescription = "Type a word", Modifier.size(32.dp))
-                }
-                message?.let {
-                    Text(
-                        it,
-                        Modifier.align(Alignment.TopCenter),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
                 }
             }
         }
@@ -278,7 +307,13 @@ private fun SyncBar(connected: Boolean, waiting: Int, error: String?, onClick: (
 private val timeFormat = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault())
 
 @Composable
-private fun EntryRow(entry: VocabEntry, onPlay: () -> Unit, onClick: () -> Unit) {
+private fun EntryRow(
+    entry: VocabEntry,
+    playing: Boolean,
+    playProgress: () -> Float,
+    onPlay: () -> Unit,
+    onClick: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -292,7 +327,7 @@ private fun EntryRow(entry: VocabEntry, onPlay: () -> Unit, onClick: () -> Unit)
                 entry.transcription == Transcription.PENDING -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text("Recognising…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Getting Thai text…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> Column {
                     Text(
@@ -336,8 +371,52 @@ private fun EntryRow(entry: VocabEntry, onPlay: () -> Unit, onClick: () -> Unit)
         }
         if (entry.audioFile != null) {
             IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Filled.PlayArrow, contentDescription = "Play", Modifier.size(32.dp))
+                Box(contentAlignment = Alignment.Center) {
+                    if (playing) {
+                        // Ring that fills while the clip plays.
+                        CircularProgressIndicator(
+                            progress = playProgress,
+                            modifier = Modifier.size(46.dp),
+                            strokeWidth = 3.dp,
+                            trackColor = MaterialTheme.colorScheme.outlineVariant,
+                            strokeCap = StrokeCap.Round,
+                        )
+                    }
+                    Icon(
+                        if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                        contentDescription = if (playing) "Stop" else "Play",
+                        Modifier.size(30.dp),
+                        tint = if (playing) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                    )
+                }
             }
+        }
+    }
+}
+
+/** Live bars for the microphone loudness, newest on the right (like the Pixel Recorder). */
+@Composable
+private fun Waveform(levels: List<Float>, modifier: Modifier = Modifier) {
+    val color = Color(0xFFE53935)
+    val quiet = MaterialTheme.colorScheme.outlineVariant
+    Canvas(modifier) {
+        val slots = 60
+        val gap = size.width / slots
+        val barWidth = gap * 0.55f
+        val mid = size.height / 2
+        for (i in 0 until slots) {
+            // Align the newest value to the right edge.
+            val level = levels.getOrNull(levels.size - slots + i) ?: 0f
+            // Square root makes quiet speech visible; never less than a small dot.
+            val h = maxOf(barWidth, kotlin.math.sqrt(level) * size.height)
+            val x = i * gap + gap / 2
+            drawLine(
+                color = if (level > 0.02f) color else quiet,
+                start = Offset(x, mid - h / 2),
+                end = Offset(x, mid + h / 2),
+                strokeWidth = barWidth,
+                cap = StrokeCap.Round,
+            )
         }
     }
 }

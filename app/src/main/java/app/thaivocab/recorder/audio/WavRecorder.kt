@@ -24,9 +24,13 @@ class WavRecorder {
 
     val isRecording: Boolean get() = running
 
-    /** Caller must hold the RECORD_AUDIO permission. */
+    /**
+     * Caller must hold the RECORD_AUDIO permission.
+     * [onLevel] receives the loudness (0..1) about 20 times per second, on the
+     * recorder thread. Used for the waveform display.
+     */
     @SuppressLint("MissingPermission")
-    fun start(target: File) {
+    fun start(target: File, onLevel: (Float) -> Unit = {}) {
         check(!running) { "Already recording" }
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
         val bufSize = maxOf(minBuf, SAMPLE_RATE) // at least 0.5 s of audio
@@ -45,7 +49,7 @@ class WavRecorder {
         ar.startRecording()
 
         thread = Thread {
-            val buf = ByteArray(bufSize)
+            val buf = ByteArray(CHUNK_BYTES)
             var total = 0L
             try {
                 while (running && total < MAX_BYTES) {
@@ -53,6 +57,7 @@ class WavRecorder {
                     if (n > 0) {
                         raf.write(buf, 0, n)
                         total += n
+                        onLevel(peakLevel(buf, n))
                     } else if (n < 0) break
                 }
             } finally {
@@ -75,6 +80,19 @@ class WavRecorder {
         record = null
         thread = null
         return System.currentTimeMillis() - startedAt
+    }
+
+    /** Highest absolute sample value in the chunk, scaled to 0..1. */
+    private fun peakLevel(buf: ByteArray, len: Int): Float {
+        var peak = 0
+        var i = 0
+        while (i + 1 < len) {
+            val sample = (buf[i].toInt() and 0xFF) or (buf[i + 1].toInt() shl 8)
+            val abs = kotlin.math.abs(sample.toShort().toInt())
+            if (abs > peak) peak = abs
+            i += 2
+        }
+        return peak / 32768f
     }
 
     private fun writeHeader(raf: RandomAccessFile, dataLen: Long) {
@@ -101,5 +119,7 @@ class WavRecorder {
         private const val ENCODING = AudioFormat.ENCODING_PCM_16BIT
         /** Hard limit of 60 seconds per clip. */
         private const val MAX_BYTES = SAMPLE_RATE * 2L * 60
+        /** 50 ms of audio per read, so the waveform updates smoothly. */
+        private const val CHUNK_BYTES = SAMPLE_RATE * 2 / 20
     }
 }

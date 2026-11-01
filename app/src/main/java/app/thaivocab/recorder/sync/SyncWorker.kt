@@ -52,11 +52,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             return@withContext Result.retry()
         }
 
-        val now = System.currentTimeMillis()
-        val pending = store.pendingSync().filter {
-            // Give speech recognition time to finish before the first upload.
-            it.transcription != Transcription.PENDING || now - it.capturedAt > 2 * 60_000
-        }
+        val pending = store.pendingSync()
 
         var failed = false
         for (entry in pending) {
@@ -71,8 +67,12 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     }
                     audioUploaded = true
                 }
-                api.upsert(session.accessToken, TABLE, entry.toRow(audioPath))
-                store.markSynced(entry.id, entry.updatedAt, audioUploaded)
+                var toSend = entry
+                if (!entry.deleted && audioPath != null && entry.transcription == Transcription.PENDING) {
+                    toSend = transcribe(api, session.accessToken, store, entry, audioPath) ?: continue
+                }
+                api.upsert(session.accessToken, TABLE, toSend.toRow(audioPath))
+                store.markSynced(entry.id, toSend.updatedAt, audioUploaded)
             } catch (e: Exception) {
                 Log.w(TAG, "Sync failed for ${entry.id}", e)
                 config.setError(e.message)
@@ -82,6 +82,33 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         if (!failed) config.setError(null)
         store.refresh()
         if (failed) Result.retry() else Result.success()
+    }
+
+    /**
+     * Gets the Thai text for an uploaded clip from the "transcribe" server function
+     * (ElevenLabs). Returns the updated entry, or null when the entry changed meanwhile.
+     * Network problems are thrown, so the job retries later; other errors mark the
+     * entry as FAILED with the reason.
+     */
+    private fun transcribe(
+        api: SupabaseApi, token: String, store: VocabStore, entry: VocabEntry, audioPath: String,
+    ): VocabEntry? {
+        val update = try {
+            val text = api.transcribe(token, audioPath).trim()
+            if (text.isEmpty()) {
+                { e: VocabEntry -> e.copy(transcription = Transcription.FAILED, transcriptionError = "no speech found") }
+            } else {
+                { e: VocabEntry -> e.copy(thai = text, transcription = Transcription.DONE, transcriptionError = null) }
+            }
+        } catch (e: HttpException) {
+            val reason = "ElevenLabs: ${e.message}".take(300)
+            ({ x: VocabEntry -> x.copy(transcription = Transcription.FAILED, transcriptionError = reason) })
+        }
+        val latest = store.get(entry.id) ?: return null
+        // The user typed a text or deleted the entry while the request ran: keep their change.
+        if (latest.transcription != Transcription.PENDING || latest.deleted) return null
+        store.update(update(latest))
+        return store.get(entry.id)
     }
 
     private fun VocabEntry.toRow(audioPath: String?) = JSONObject().apply {
