@@ -62,6 +62,10 @@ database later.
 2. Open the downloaded file. Android asks you to allow installation from this source
    (browser or Files app) one time. Allow it, then install.
 3. New versions install over the old version. Your local entries are kept.
+   **Do not uninstall first**: that deletes words that are not uploaded yet.
+4. Later updates: when a newer build exists, the app shows a banner
+   **"New version (build N) – tap to install"**. One tap downloads it and opens
+   Android's installer. The first time, Android asks you to allow installs from this app.
 
 ### 3. Connect the app
 

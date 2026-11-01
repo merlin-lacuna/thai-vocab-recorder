@@ -49,7 +49,7 @@ object SampleData {
 fun PreviewList() = ThaiVocabTheme(darkTheme = false) {
     MainContent(
         entries = SampleData.entries, recording = false, message = null, connected = true, syncError = null,
-        playingId = "2", playProgress = { 0.6f },
+        playingId = "2", playProgress = { 0.6f }, updateBuild = 21,
     )
 }
 

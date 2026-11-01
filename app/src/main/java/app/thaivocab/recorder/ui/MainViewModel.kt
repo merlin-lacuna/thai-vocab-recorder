@@ -13,6 +13,7 @@ import app.thaivocab.recorder.data.VocabStore
 import app.thaivocab.recorder.sync.SupabaseApi
 import app.thaivocab.recorder.sync.SupabaseConfig
 import app.thaivocab.recorder.sync.SyncWorker
+import app.thaivocab.recorder.update.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -49,6 +50,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _playProgress = MutableStateFlow(0f)
     val playProgress: StateFlow<Float> = _playProgress.asStateFlow()
     private var progressJob: Job? = null
+
+    // In-app update from the "latest" GitHub release.
+    private val updater = Updater(app)
+    private val _update = MutableStateFlow<Updater.Available?>(null)
+    val update: StateFlow<Updater.Available?> = _update.asStateFlow()
+    /** Download progress 0..1 while an update downloads, else null. */
+    private val _updateProgress = MutableStateFlow<Float?>(null)
+    val updateProgress: StateFlow<Float?> = _updateProgress.asStateFlow()
+    private var lastUpdateCheck = 0L
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -222,6 +232,29 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun syncNow() = SyncWorker.schedule(getApplication())
+
+    /** Checks GitHub for a newer build, at most every 10 minutes. */
+    fun checkForUpdate() {
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateCheck < 10 * 60_000) return
+        lastUpdateCheck = now
+        viewModelScope.launch { _update.value = updater.check() }
+    }
+
+    fun installUpdate() {
+        if (_updateProgress.value != null) return
+        _updateProgress.value = 0f
+        viewModelScope.launch {
+            try {
+                val apk = updater.download { p -> _updateProgress.value = p }
+                updater.install(apk)
+            } catch (e: Exception) {
+                showMessage("Update failed: ${e.message}")
+            } finally {
+                _updateProgress.value = null
+            }
+        }
+    }
 
     /** Signs in to Supabase. Returns an error message, or null on success. */
     suspend fun connect(url: String, apiKey: String, email: String, password: String): String? =

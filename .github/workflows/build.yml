@@ -47,13 +47,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      # On the main branch, also publish the APK as the "latest" GitHub release,
-      # so it can be downloaded on the phone directly (no zip file).
+      # On the default branch, publish the APK as the "latest" GitHub release. The app
+      # reads version.json from there to offer "Install update" with one tap.
+      - name: Write version.json
+        if: github.ref_name == github.event.repository.default_branch
+        run: echo '{"versionCode": ${{ github.run_number }}, "versionName": "0.1.${{ github.run_number }}"}' > version.json
+
       - name: Publish latest release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_name == github.event.repository.default_branch
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Latest build (${{ github.run_number }})
+          name: Latest build
           make_latest: true
-          files: thai-vocab-recorder.apk
+          overwrite_files: true
+          files: |
+            thai-vocab-recorder.apk
+            version.json

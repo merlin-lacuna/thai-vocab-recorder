@@ -77,6 +77,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import app.thaivocab.recorder.data.CaptureContext
@@ -97,10 +98,13 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val levels by vm.levels.collectAsStateWithLifecycle()
     val playingId by vm.playingId.collectAsStateWithLifecycle()
     val playProgress = vm.playProgress.collectAsStateWithLifecycle()
+    val update by vm.update.collectAsStateWithLifecycle()
+    val updateProgress by vm.updateProgress.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
         vm.syncNow() // also downloads changes made elsewhere, e.g. in the Supabase dashboard
+        vm.checkForUpdate()
         onPauseOrDispose { }
     }
 
@@ -124,6 +128,9 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         levels = levels,
         playingId = playingId,
         playProgress = { playProgress.value },
+        updateBuild = update?.versionCode,
+        updateProgress = updateProgress,
+        onUpdateClick = vm::installUpdate,
         onSyncBarClick = { showSetup = true },
         onEntryClick = { editing = it },
         onPlay = vm::play,
@@ -171,6 +178,9 @@ fun MainContent(
     levels: List<Float> = emptyList(),
     playingId: String? = null,
     playProgress: () -> Float = { 0f },
+    updateBuild: Long? = null,
+    updateProgress: Float? = null,
+    onUpdateClick: () -> Unit = {},
     onSyncBarClick: () -> Unit = {},
     onEntryClick: (VocabEntry) -> Unit = {},
     onPlay: (VocabEntry) -> Unit = {},
@@ -193,6 +203,7 @@ fun MainContent(
                 error = syncError,
                 onClick = onSyncBarClick,
             )
+            if (updateBuild != null) UpdateBanner(updateBuild, updateProgress, onUpdateClick)
             ContextBar(selected = captureContext, onSelect = onContextChange)
             HorizontalDivider()
 
@@ -257,6 +268,27 @@ fun MainContent(
                     Icon(Icons.Filled.Keyboard, contentDescription = "Type a word", Modifier.size(32.dp))
                 }
             }
+        }
+    }
+}
+
+/** Shown when GitHub has a newer build. One tap downloads it and opens the installer. */
+@Composable
+private fun UpdateBanner(build: Long, progress: Float?, onClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = progress == null, onClick = onClick),
+    ) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.SystemUpdate, contentDescription = null)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (progress == null) "New version (build $build) – tap to install"
+                else "Downloading update… ${(progress * 100).toInt()} %",
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
