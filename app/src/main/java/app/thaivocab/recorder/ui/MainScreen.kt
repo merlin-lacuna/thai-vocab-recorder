@@ -27,6 +27,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -204,7 +213,6 @@ fun MainContent(
                 onClick = onSyncBarClick,
             )
             if (updateBuild != null) UpdateBanner(updateBuild, updateProgress, onUpdateClick)
-            ContextBar(selected = captureContext, onSelect = onContextChange)
             HorizontalDivider()
 
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -216,7 +224,16 @@ fun MainContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
+                    val listState = rememberLazyListState()
+                    val scope = rememberCoroutineScope()
+                    // After a new recording, show the newest entry at the top.
+                    LaunchedEffect(entries.firstOrNull()?.id) { listState.animateScrollToItem(0) }
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScrollbar(listState, MaterialTheme.colorScheme.onSurfaceVariant),
+                    ) {
                         items(entries, key = { it.id }) { entry ->
                             EntryRow(
                                 entry,
@@ -228,8 +245,25 @@ fun MainContent(
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         }
                     }
+                    // Shown when the list is not at the top.
+                    if (listState.canScrollBackward) {
+                        SmallFloatingActionButton(
+                            onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                            modifier = Modifier.align(Alignment.TopCenter).padding(top = 8.dp),
+                        ) {
+                            Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Filled.ArrowUpward, contentDescription = null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Newest")
+                            }
+                        }
+                    }
                 }
             }
+
+            HorizontalDivider()
+            // Context labels near the record button, in reach of the thumb.
+            ContextBar(selected = captureContext, onSelect = onContextChange)
 
             // Waveform while recording; otherwise space for short messages.
             Box(
@@ -272,6 +306,34 @@ fun MainContent(
     }
 }
 
+/**
+ * Thin scrollbar on the right edge of a list. It shows where the visible part is in
+ * the whole list, and stays visible whenever the list is longer than the screen.
+ */
+private fun Modifier.verticalScrollbar(state: LazyListState, color: Color): Modifier = drawWithContent {
+    drawContent()
+    val info = state.layoutInfo
+    val visible = info.visibleItemsInfo
+    val total = info.totalItemsCount
+    if (total == 0 || visible.isEmpty()) return@drawWithContent
+    if (!state.canScrollForward && !state.canScrollBackward) return@drawWithContent
+
+    // Position in "items", including the part of the first item that is scrolled away.
+    val first = visible.first()
+    val position = first.index + state.firstVisibleItemScrollOffset.toFloat() / first.size.coerceAtLeast(1)
+    val shown = visible.size.toFloat().coerceAtMost(total.toFloat())
+    val thumbHeight = (size.height * shown / total).coerceAtLeast(32.dp.toPx())
+    val maxPosition = (total - shown).coerceAtLeast(1f)
+    val top = (size.height - thumbHeight) * (position / maxPosition).coerceIn(0f, 1f)
+    val width = 4.dp.toPx()
+    drawRoundRect(
+        color = color.copy(alpha = 0.5f),
+        topLeft = Offset(size.width - width - 2.dp.toPx(), top),
+        size = Size(width, thumbHeight),
+        cornerRadius = CornerRadius(width / 2),
+    )
+}
+
 /** Shown when GitHub has a newer build. One tap downloads it and opens the installer. */
 @Composable
 private fun UpdateBanner(build: Long, progress: Float?, onClick: () -> Unit) {
@@ -301,8 +363,8 @@ private fun ContextBar(selected: CaptureContext, onSelect: (CaptureContext) -> U
     FlowRow(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+            .padding(start = 12.dp, end = 12.dp, top = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
         CaptureContext.entries.forEach { c ->
             FilterChip(
