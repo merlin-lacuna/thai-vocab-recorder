@@ -100,6 +100,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
+        vm.syncNow() // also downloads changes made elsewhere, e.g. in the Supabase dashboard
         onPauseOrDispose { }
     }
 
@@ -342,6 +343,10 @@ private fun EntryRow(
                         )
                     }
                 }
+            }
+            val meaning = listOfNotNull(entry.romanization, entry.english).joinToString(" · ")
+            if (meaning.isNotEmpty()) {
+                Text(meaning, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
             }
             if (entry.alternatives.isNotEmpty()) {
                 Text(

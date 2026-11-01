@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -118,6 +119,17 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         return json.optString("text", "")
     }
 
+    /** Reads rows through the REST API. [query] is the PostgREST query string. */
+    fun select(token: String, table: String, query: String): JSONArray =
+        JSONArray(String(requestBytes("GET", "/rest/v1/$table?$query", token, null, null)))
+
+    /** Downloads a private file from Storage. */
+    fun downloadFile(token: String, bucket: String, path: String): ByteArray =
+        requestBytes(
+            "GET", "/storage/v1/object/authenticated/$bucket/${path.split('/').joinToString("/") { enc(it) }}",
+            token, null, null,
+        )
+
     private fun request(
         method: String,
         path: String,
@@ -125,24 +137,35 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         contentType: String,
         body: ByteArray,
         extraHeaders: Map<String, String> = emptyMap(),
-    ): String {
+    ): String = String(requestBytes(method, path, token, contentType, body, extraHeaders))
+
+    private fun requestBytes(
+        method: String,
+        path: String,
+        token: String?,
+        contentType: String?,
+        body: ByteArray?,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): ByteArray {
         val conn = URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = method
             conn.connectTimeout = 15_000
             conn.readTimeout = 30_000
-            conn.doOutput = true
             conn.setRequestProperty("apikey", apiKey)
             conn.setRequestProperty("Authorization", "Bearer ${token ?: apiKey}")
-            conn.setRequestProperty("Content-Type", contentType)
+            contentType?.let { conn.setRequestProperty("Content-Type", it) }
             extraHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
-            conn.setFixedLengthStreamingMode(body.size)
-            conn.outputStream.use { it.write(body) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setFixedLengthStreamingMode(body.size)
+                conn.outputStream.use { it.write(body) }
+            }
             val code = conn.responseCode
-            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                ?.bufferedReader()?.use { it.readText() }.orEmpty()
-            if (code !in 200..299) throw HttpException(code, text)
-            return text
+            val bytes = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.use { it.readBytes() } ?: ByteArray(0)
+            if (code !in 200..299) throw HttpException(code, String(bytes))
+            return bytes
         } finally {
             conn.disconnect()
         }

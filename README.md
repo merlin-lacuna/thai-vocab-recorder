@@ -86,6 +86,11 @@ The app stores only a login token; the password is not saved.
 * **Offline first:** each entry is first saved in a local SQLite database on the phone.
   A background job (Android WorkManager) uploads the entries when a network is available
   and retries automatically after an error.
+* **Download:** at each sync (and each time you open the app), the app downloads the
+  newest 500 words and their audio from the database. So the list also shows changes
+  made in the Supabase dashboard (for example a corrected spelling, an English meaning),
+  and your history comes back after a reinstall. Local changes that are not uploaded
+  yet always win. A word deleted in the dashboard also disappears from the phone.
 * **Edits and deletes** on the phone are also uploaded. A delete sets `deleted_at` in the
   database (soft delete), so other apps can ignore the item.
 

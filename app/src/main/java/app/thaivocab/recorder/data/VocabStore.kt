@@ -45,6 +45,9 @@ data class VocabEntry(
     val context: CaptureContext = CaptureContext.FIELD,
     /** Why speech recognition failed, if it did. */
     val transcriptionError: String? = null,
+    /** Filled in the database (by hand or by an enrichment step); read-only on the phone. */
+    val english: String? = null,
+    val romanization: String? = null,
     val transcription: Transcription,
     /** True when the local version has changes that are not in the cloud yet. */
     val dirty: Boolean,
@@ -54,7 +57,7 @@ data class VocabEntry(
 
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 3) {
+    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 4) {
 
     private val _entries = MutableStateFlow<List<VocabEntry>>(emptyList())
 
@@ -81,7 +84,9 @@ class VocabStore private constructor(context: Context) :
                 audio_uploaded INTEGER NOT NULL DEFAULT 0,
                 deleted INTEGER NOT NULL DEFAULT 0,
                 context TEXT NOT NULL DEFAULT 'FIELD',
-                transcription_error TEXT
+                transcription_error TEXT,
+                english TEXT,
+                romanization TEXT
             )
             """.trimIndent()
         )
@@ -90,6 +95,10 @@ class VocabStore private constructor(context: Context) :
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE entries ADD COLUMN context TEXT NOT NULL DEFAULT 'FIELD'")
         if (oldVersion < 3) db.execSQL("ALTER TABLE entries ADD COLUMN transcription_error TEXT")
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE entries ADD COLUMN english TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN romanization TEXT")
+        }
     }
 
     @Synchronized
@@ -150,6 +159,48 @@ class VocabStore private constructor(context: Context) :
         writableDatabase.update("entries", values, "id = ?", arrayOf(id))
     }
 
+    /**
+     * Applies the newest rows from the cloud database. [server] holds the newest rows
+     * (deleted ones included), newest first; [complete] is true when it holds all rows.
+     * Local entries with changes that are not uploaded yet keep the local version.
+     * Clean local entries that are missing on the server (deleted in the dashboard) are removed.
+     */
+    @Synchronized
+    fun mergeFromServer(server: List<VocabEntry>, complete: Boolean) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val serverIds = HashSet<String>()
+            for (remote in server) {
+                serverIds += remote.id
+                val local = get(remote.id)
+                if (local != null && local.dirty) continue
+                if (remote.deleted) {
+                    local?.audioFile?.let { File(it).delete() }
+                    db.delete("entries", "id = ?", arrayOf(remote.id))
+                } else {
+                    db.insertWithOnConflict("entries", null, remote.toValues(), SQLiteDatabase.CONFLICT_REPLACE)
+                }
+            }
+            // Clean local entries in the covered time range that the server no longer has.
+            val oldest = if (complete || server.isEmpty()) 0L else server.minOf { it.capturedAt }
+            db.query("entries", arrayOf("id", "audio_file"), "dirty = 0 AND captured_at >= ?",
+                arrayOf(oldest.toString()), null, null, null).use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0)
+                    if (id !in serverIds) {
+                        if (!c.isNull(1)) File(c.getString(1)).delete()
+                        db.delete("entries", "id = ?", arrayOf(id))
+                    }
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        refresh()
+    }
+
     @Synchronized
     fun refresh() {
         _entries.value = readableDatabase.query(
@@ -171,6 +222,8 @@ class VocabStore private constructor(context: Context) :
         put("deleted", if (deleted) 1 else 0)
         put("context", context.name)
         put("transcription_error", transcriptionError)
+        put("english", english)
+        put("romanization", romanization)
     }
 
     private fun Cursor.toEntry(): VocabEntry {
@@ -191,6 +244,8 @@ class VocabStore private constructor(context: Context) :
             deleted = long("deleted") == 1L,
             context = runCatching { CaptureContext.valueOf(str("context")!!) }.getOrDefault(CaptureContext.FIELD),
             transcriptionError = str("transcription_error"),
+            english = str("english"),
+            romanization = str("romanization"),
         )
     }
 

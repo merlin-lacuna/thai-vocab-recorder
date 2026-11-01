@@ -181,7 +181,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun play(entry: VocabEntry) {
         if (_playingId.value == entry.id) return stopPlayback()
         val path = entry.audioFile ?: return
-        if (!File(path).exists()) return showMessage("Audio file is missing")
+        if (!File(path).exists()) {
+            syncNow()
+            return showMessage("Audio is still downloading – try again in a moment")
+        }
         stopPlayback()
         val mp = try {
             MediaPlayer().apply {

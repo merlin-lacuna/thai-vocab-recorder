@@ -10,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import app.thaivocab.recorder.data.CaptureContext
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.data.VocabStore
@@ -19,6 +20,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
 
 /**
@@ -79,6 +81,16 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 failed = true
             }
         }
+        // Then download the newest rows, so the phone also shows words from other sources,
+        // changes made in the dashboard, and the history after a reinstall.
+        try {
+            pull(api, session.accessToken, session.userId, store)
+        } catch (e: Exception) {
+            Log.w(TAG, "Download failed", e)
+            config.setError(e.message)
+            failed = true
+        }
+
         if (!failed) config.setError(null)
         store.refresh()
         if (failed) Result.retry() else Result.success()
@@ -111,6 +123,70 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         return store.get(entry.id)
     }
 
+    private fun pull(api: SupabaseApi, token: String, userId: String, store: VocabStore) {
+        val rows = api.select(
+            token, TABLE,
+            "select=id,thai,thai_alternatives,notes,audio_path,context,teacher,transcription_status," +
+                "transcription_error,english,romanization,captured_at,updated_at,deleted_at" +
+                "&order=captured_at.desc&limit=$PULL_LIMIT",
+        )
+        val audioDir = File(applicationContext.filesDir, "audio")
+        val remote = (0 until rows.length()).map { i -> rows.getJSONObject(i).toEntry(audioDir) }
+        store.mergeFromServer(remote, complete = remote.size < PULL_LIMIT)
+
+        // Fetch audio that is missing on the phone, newest first.
+        remote.asSequence()
+            .filter { !it.deleted && it.audioFile != null && !File(it.audioFile).exists() }
+            .take(AUDIO_DOWNLOAD_LIMIT)
+            .forEach { e ->
+                val path = rows.getJSONObject(remote.indexOf(e)).optString("audio_path")
+                val bytes = api.downloadFile(token, AUDIO_BUCKET, path)
+                val target = File(e.audioFile!!)
+                target.parentFile?.mkdirs()
+                val tmp = File(target.path + ".part")
+                tmp.writeBytes(bytes)
+                tmp.renameTo(target)
+            }
+    }
+
+    private fun JSONObject.toEntry(audioDir: File): VocabEntry {
+        fun str(key: String): String? = if (isNull(key)) null else optString(key)
+        fun time(key: String): Long? = str(key)?.let { OffsetDateTime.parse(it).toInstant().toEpochMilli() }
+        val id = getString("id")
+        val alts = optJSONArray("thai_alternatives") ?: JSONArray()
+        val context = when (str("context")) {
+            "lingping_club" -> CaptureContext.LINGPING
+            "lesson" -> when (str("teacher")?.lowercase()) {
+                "ae" -> CaptureContext.KRU_AE
+                else -> CaptureContext.KRU_BOOM
+            }
+            else -> CaptureContext.FIELD
+        }
+        val thai = str("thai")
+        return VocabEntry(
+            id = id,
+            thai = thai,
+            alternatives = List(alts.length()) { alts.getString(it) },
+            notes = str("notes"),
+            audioFile = str("audio_path")?.let { File(audioDir, "$id.wav").absolutePath },
+            capturedAt = time("captured_at") ?: 0L,
+            updatedAt = time("updated_at") ?: 0L,
+            transcription = when (str("transcription_status")) {
+                "done" -> Transcription.DONE
+                "failed" -> Transcription.FAILED
+                "pending" -> Transcription.PENDING
+                else -> if (thai != null) Transcription.MANUAL else Transcription.FAILED
+            },
+            dirty = false,
+            audioUploaded = true,
+            deleted = str("deleted_at") != null,
+            context = context,
+            transcriptionError = str("transcription_error"),
+            english = str("english"),
+            romanization = str("romanization"),
+        )
+    }
+
     private fun VocabEntry.toRow(audioPath: String?) = JSONObject().apply {
         put("id", id)
         put("thai", thai ?: JSONObject.NULL)
@@ -132,6 +208,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         const val TABLE = "vocab_items"
         const val AUDIO_BUCKET = "vocab-audio"
         const val SOURCE = "field_recorder"
+        private const val PULL_LIMIT = 500
+        private const val AUDIO_DOWNLOAD_LIMIT = 100
 
         /** Asks WorkManager to run a sync as soon as there is a network connection. */
         fun schedule(context: Context, delaySeconds: Long = 0) {
