@@ -178,12 +178,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     putString("refresh_token", session.refreshToken)
                     remove("last_error")
                 }
+                draftPassword = ""
                 SyncWorker.schedule(getApplication())
                 null
             } catch (e: Exception) {
                 e.message ?: e.toString()
             }
         }
+
+    /** Password typed in the set-up window. Kept in memory only, never written to storage. */
+    var draftPassword: String = ""
+
+    fun saveSetupDraft(url: String, apiKey: String, email: String) = config.saveDraft(url, apiKey, email)
 
     fun disconnect() = config.save { remove("refresh_token"); remove("user_id") }
 

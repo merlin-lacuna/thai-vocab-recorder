@@ -30,7 +30,7 @@ class SupabaseConfig private constructor(context: Context) {
     }
 
     private fun read() = State(
-        url = prefs.getString("url", "") ?: "",
+        url = prefs.getString("url", null) ?: DEFAULT_URL,
         apiKey = prefs.getString("api_key", "") ?: "",
         email = prefs.getString("email", "") ?: "",
         userId = prefs.getString("user_id", null),
@@ -46,7 +46,16 @@ class SupabaseConfig private constructor(context: Context) {
 
     fun setError(message: String?) = save { putString("last_error", message) }
 
+    /** Saves the set-up form while the user types, so nothing is lost if the window closes. */
+    fun saveDraft(url: String, apiKey: String, email: String) {
+        prefs.edit().putString("url", url).putString("api_key", apiKey).putString("email", email).apply()
+        _state.value = read() // SharedPreferences updates its memory copy at once
+    }
+
     companion object {
+        /** The project of this app. Can be changed in the set-up window. */
+        const val DEFAULT_URL = "https://vazojhdllcilzbdtavww.supabase.co"
+
         @Volatile private var instance: SupabaseConfig? = null
         fun get(context: Context): SupabaseConfig =
             instance ?: synchronized(this) { instance ?: SupabaseConfig(context).also { instance = it } }

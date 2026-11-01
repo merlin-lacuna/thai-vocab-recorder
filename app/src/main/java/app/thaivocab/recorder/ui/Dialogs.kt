@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.sync.SupabaseConfig
 import kotlinx.coroutines.launch
@@ -133,12 +135,18 @@ fun SetupDialog(vm: MainViewModel, state: SupabaseConfig.State, onDismiss: () ->
     var url by remember { mutableStateOf(state.url) }
     var key by remember { mutableStateOf(state.apiKey) }
     var email by remember { mutableStateOf(state.email) }
-    var password by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf(vm.draftPassword) }
+
+    // Save every change at once, so the input survives if the window closes.
+    LaunchedEffect(url, key, email) { vm.saveSetupDraft(url.trim(), key.trim(), email.trim()) }
+    LaunchedEffect(password) { vm.draftPassword = password }
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        // A tap next to the window must not close it; use "Later" or the back gesture.
+        properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text(if (state.connected) "Database connection" else "Connect to database") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
