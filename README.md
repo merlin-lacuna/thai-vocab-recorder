@@ -77,8 +77,9 @@ The app stores only a login token; the password is not saved.
 
 * **Capture:** the microphone records 16 kHz mono WAV while you hold the button
   (maximum 60 seconds). Clips shorter than 0.4 seconds are ignored.
-* **Context:** the buttons at the top select where you are: *Field work* (default),
-  *Lingping* (club), or a lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
+* **Context:** the buttons at the top select where the word comes from: *Field work*
+  (default), *Just wondering* (looked up out of curiosity), *Lingping* (club), or a
+  lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
   each entry. It returns to *Field work* after 4 hours without a recording.
 * **Thai text and meaning:** after upload, the app calls the Supabase Edge Function
   `process` (`supabase/functions/process/`). For a new clip, the function sends the audio
@@ -111,7 +112,7 @@ to the hand-written specification (171.0 – 171.11).
 |---|---|---|---|
 | `id` | 11 | input app | UUID, created on the phone |
 | `captured_at` | 1 | input app | date and time (UTC) |
-| `context`, `teacher` | 0 | recorder | `field` (default), `lingping_club`, or `lesson` with teacher `Boom` / `Ae` |
+| `context`, `teacher` | 0 | recorder | `field` (default), `wondering`, `lingping_club`, or `lesson` with teacher `Boom` / `Ae` |
 | `source` | 140 | each input app | `field_recorder`, later `lesson_recorder`, `pickup_thai`, … |
 | `thai`, `thai_alternatives` | 2 | recorder | Thai script from speech recognition, or typed |
 | `audio_path` | 7 | recorder | original recording in the Storage bucket `vocab-audio` (always kept) |

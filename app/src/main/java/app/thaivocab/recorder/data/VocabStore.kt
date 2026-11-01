@@ -12,11 +12,13 @@ import org.json.JSONArray
 import java.io.File
 
 /**
- * Where the word was heard. FIELD (cafe, taxi, daily life) is the default.
+ * Where the word came from. FIELD (cafe, taxi, daily life) is the default.
+ * WONDERING: looked up out of curiosity, without a real-life situation.
  * Lessons store the teacher's name.
  */
 enum class CaptureContext(val dbValue: String, val label: String, val teacher: String?) {
     FIELD("field", "Field work", null),
+    WONDERING("wondering", "Just wondering", null),
     LINGPING("lingping_club", "Lingping", null),
     KRU_BOOM("lesson", "Kru Boom", "Boom"),
     KRU_AE("lesson", "Kru Ae", "Ae");

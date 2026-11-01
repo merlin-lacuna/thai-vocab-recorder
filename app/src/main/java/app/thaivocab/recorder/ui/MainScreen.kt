@@ -69,8 +69,8 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -294,12 +294,13 @@ private fun UpdateBanner(build: Long, progress: Float?, onClick: () -> Unit) {
 }
 
 /** Field work (default), Lingping club, or a lesson with a teacher. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ContextBar(selected: CaptureContext, onSelect: (CaptureContext) -> Unit) {
-    Row(
+    // Wraps onto a second line when the screen is too narrow, so every label is visible.
+    FlowRow(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {

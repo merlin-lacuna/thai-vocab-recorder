@@ -166,6 +166,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val alts = optJSONArray("thai_alternatives") ?: JSONArray()
         val context = when (str("context")) {
             "lingping_club" -> CaptureContext.LINGPING
+            "wondering" -> CaptureContext.WONDERING
             "lesson" -> when (str("teacher")?.lowercase()) {
                 "ae" -> CaptureContext.KRU_AE
                 else -> CaptureContext.KRU_BOOM
