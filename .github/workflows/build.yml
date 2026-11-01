@@ -11,15 +11,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
-
+      # The Android SDK is already installed on GitHub's Ubuntu servers (ANDROID_HOME).
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build release APK
@@ -32,6 +31,20 @@ jobs:
         with:
           name: thai-vocab-recorder-apk
           path: thai-vocab-recorder.apk
+          retention-days: 30
+
+      # Screenshots of the main screens, drawn without a phone (Paparazzi).
+      - name: Screenshots
+        id: screenshots
+        continue-on-error: true
+        run: ./gradlew --no-daemon recordPaparazziDebug
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: app/src/test/snapshots/images/*.png
+          if-no-files-found: ignore
           retention-days: 30
 
       # On the main branch, also publish the APK as the "latest" GitHub release,

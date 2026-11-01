@@ -86,68 +86,29 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     var typing by remember { mutableStateOf(false) }
     var showSetup by remember { mutableStateOf(false) }
 
-    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-        ) {
-            SyncBar(
-                connected = supabase.connected,
-                waiting = entries.count { it.dirty },
-                error = supabase.lastError,
-                onClick = { showSetup = true },
-            )
-            HorizontalDivider()
-
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (entries.isEmpty()) {
-                    Text(
-                        "Hold the red button and say the word.\nThe Thai text appears here.",
-                        Modifier.align(Alignment.Center).padding(32.dp),
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    LazyColumn(Modifier.fillMaxSize()) {
-                        items(entries, key = { it.id }) { entry ->
-                            EntryRow(entry, onPlay = { vm.play(entry) }, onClick = { editing = entry })
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-                        }
-                    }
-                }
-            }
-
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 28.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                RecordButton(
-                    recording = recording,
-                    onStart = vm::startRecording,
-                    onStop = vm::stopRecording,
-                    onPermissionDenied = { vm.showMessage("Microphone permission is needed") },
-                )
-                IconButton(
-                    onClick = { typing = true },
-                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp).size(56.dp),
-                ) {
-                    Icon(Icons.Filled.Keyboard, contentDescription = "Type a word", Modifier.size(32.dp))
-                }
-                message?.let {
-                    Text(
-                        it,
-                        Modifier.align(Alignment.TopCenter),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-        }
+    val context = LocalContext.current
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (!granted) vm.showMessage("Microphone permission is needed")
     }
+
+    MainContent(
+        entries = entries,
+        recording = recording,
+        message = message,
+        connected = supabase.connected,
+        syncError = supabase.lastError,
+        onSyncBarClick = { showSetup = true },
+        onEntryClick = { editing = it },
+        onPlay = vm::play,
+        onStartRecording = vm::startRecording,
+        onStopRecording = vm::stopRecording,
+        hasMicPermission = {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        },
+        onRequestMicPermission = { permissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+        onTypeClick = { typing = true },
+    )
 
     editing?.let { entry ->
         EditDialog(
@@ -163,6 +124,91 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     }
     if (showSetup) {
         SetupDialog(vm = vm, state = supabase, onDismiss = { showSetup = false })
+    }
+}
+
+/**
+ * The visible screen, without any app logic. Previews and screenshot tests call
+ * this function directly with sample data.
+ */
+@Composable
+fun MainContent(
+    entries: List<VocabEntry>,
+    recording: Boolean,
+    message: String?,
+    connected: Boolean,
+    syncError: String?,
+    onSyncBarClick: () -> Unit = {},
+    onEntryClick: (VocabEntry) -> Unit = {},
+    onPlay: (VocabEntry) -> Unit = {},
+    onStartRecording: () -> Unit = {},
+    onStopRecording: () -> Unit = {},
+    hasMicPermission: () -> Boolean = { true },
+    onRequestMicPermission: () -> Unit = {},
+    onTypeClick: () -> Unit = {},
+) {
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        ) {
+            SyncBar(
+                connected = connected,
+                waiting = entries.count { it.dirty },
+                error = syncError,
+                onClick = onSyncBarClick,
+            )
+            HorizontalDivider()
+
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (entries.isEmpty()) {
+                    Text(
+                        "Hold the red button and say the word.\nThe Thai text appears here.",
+                        Modifier.align(Alignment.Center).padding(32.dp),
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        items(entries, key = { it.id }) { entry ->
+                            EntryRow(entry, onPlay = { onPlay(entry) }, onClick = { onEntryClick(entry) })
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                        }
+                    }
+                }
+            }
+
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp, bottom = 28.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                RecordButton(
+                    recording = recording,
+                    onStart = onStartRecording,
+                    onStop = onStopRecording,
+                    hasPermission = hasMicPermission,
+                    onRequestPermission = onRequestMicPermission,
+                )
+                IconButton(
+                    onClick = onTypeClick,
+                    modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp).size(56.dp),
+                ) {
+                    Icon(Icons.Filled.Keyboard, contentDescription = "Type a word", Modifier.size(32.dp))
+                }
+                message?.let {
+                    Text(
+                        it,
+                        Modifier.align(Alignment.TopCenter),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -247,16 +293,14 @@ private fun RecordButton(
     recording: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onPermissionDenied: () -> Unit,
+    hasPermission: () -> Boolean,
+    onRequestPermission: () -> Unit,
 ) {
-    val context = LocalContext.current
     val view = LocalView.current
     val currentOnStart by rememberUpdatedState(onStart)
     val currentOnStop by rememberUpdatedState(onStop)
-
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (!granted) onPermissionDenied()
-    }
+    val currentHasPermission by rememberUpdatedState(hasPermission)
+    val currentOnRequestPermission by rememberUpdatedState(onRequestPermission)
 
     var startedAt by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
@@ -285,10 +329,8 @@ private fun RecordButton(
             .background(color)
             .pointerInput(Unit) {
                 detectTapGestures(onPress = {
-                    val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-                        PackageManager.PERMISSION_GRANTED
-                    if (!granted) {
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    if (!currentHasPermission()) {
+                        currentOnRequestPermission()
                         return@detectTapGestures
                     }
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
