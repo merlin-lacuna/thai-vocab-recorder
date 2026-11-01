@@ -76,11 +76,15 @@ The app stores only a login token; the password is not saved.
 * **Context:** the buttons at the top select where you are: *Field work* (default),
   *Lingping* (club), or a lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
   each entry. It returns to *Field work* after 4 hours without a recording.
-* **Thai text:** after upload, the app calls the Supabase Edge Function `transcribe`
-  (`supabase/functions/transcribe/`). The function sends the clip to the ElevenLabs
-  speech-to-text API (language Thai) and returns the text. The ElevenLabs key is stored
-  only in Supabase (**Edge Functions → Secrets → `ELEVENLABS_API_KEY`**). If it fails,
-  the entry shows the reason and a **Try recognition again** button. The audio is always kept.
+* **Thai text and meaning:** after upload, the app calls the Supabase Edge Function
+  `process` (`supabase/functions/process/`). For a new clip, the function sends the audio
+  to ElevenLabs speech-to-text (Thai). Then it sends the Thai text to Gemini, which returns
+  the standard spelling, romanization, English meaning, word/phrase and part of speech.
+  The function saves all of it in the database and returns it to the phone. A corrected
+  spelling replaces `thai`; the original transcript stays in `thai_alternatives`. Rows
+  with `enrichment_status = 'reviewed'` are never changed by the AI.
+  Keys are stored only in Supabase (**Edge Functions → Secrets**): `ELEVENLABS_API_KEY`
+  and `GEMINI_API_KEY`. Errors are saved in `transcription_error` / `enrichment_error`.
 * **Waveform and playback:** bars show the microphone level while you record. During
   playback, a ring around the play button shows the progress; tap again to stop.
 * **Offline first:** each entry is first saved in a local SQLite database on the phone.

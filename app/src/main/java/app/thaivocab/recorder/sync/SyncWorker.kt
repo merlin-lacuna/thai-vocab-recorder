@@ -55,6 +55,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         }
 
         val pending = store.pendingSync()
+        val audioDir = File(applicationContext.filesDir, "audio")
 
         var failed = false
         for (entry in pending) {
@@ -69,12 +70,26 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     }
                     audioUploaded = true
                 }
-                var toSend = entry
-                if (!entry.deleted && audioPath != null && entry.transcription == Transcription.PENDING) {
-                    toSend = transcribe(api, session.accessToken, store, entry, audioPath) ?: continue
+                api.upsert(session.accessToken, TABLE, entry.toRow(audioPath))
+
+                // Server step: Thai text from ElevenLabs, then spelling, romanization and
+                // English from Gemini. Network problems are thrown, so the entry stays
+                // "not uploaded" and the job retries later.
+                var processed: VocabEntry? = null
+                if (!entry.deleted && needsProcessing(entry)) {
+                    try {
+                        processed = api.process(session.accessToken, entry.id).toEntry(audioDir)
+                    } catch (e: HttpException) {
+                        Log.w(TAG, "process failed for ${entry.id}", e)
+                        config.setError(e.message)
+                        if (entry.transcription == Transcription.PENDING) {
+                            store.update(entry.copy(transcription = Transcription.FAILED, transcriptionError = e.message))
+                            continue
+                        }
+                    }
                 }
-                api.upsert(session.accessToken, TABLE, toSend.toRow(audioPath))
-                store.markSynced(entry.id, toSend.updatedAt, audioUploaded)
+                store.markSynced(entry.id, entry.updatedAt, audioUploaded)
+                processed?.let { store.applyRemote(it) }
             } catch (e: Exception) {
                 Log.w(TAG, "Sync failed for ${entry.id}", e)
                 config.setError(e.message)
@@ -96,32 +111,9 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         if (failed) Result.retry() else Result.success()
     }
 
-    /**
-     * Gets the Thai text for an uploaded clip from the "transcribe" server function
-     * (ElevenLabs). Returns the updated entry, or null when the entry changed meanwhile.
-     * Network problems are thrown, so the job retries later; other errors mark the
-     * entry as FAILED with the reason.
-     */
-    private fun transcribe(
-        api: SupabaseApi, token: String, store: VocabStore, entry: VocabEntry, audioPath: String,
-    ): VocabEntry? {
-        val update = try {
-            val text = api.transcribe(token, audioPath).trim()
-            if (text.isEmpty()) {
-                { e: VocabEntry -> e.copy(transcription = Transcription.FAILED, transcriptionError = "no speech found") }
-            } else {
-                { e: VocabEntry -> e.copy(thai = text, transcription = Transcription.DONE, transcriptionError = null) }
-            }
-        } catch (e: HttpException) {
-            val reason = "ElevenLabs: ${e.message}".take(300)
-            ({ x: VocabEntry -> x.copy(transcription = Transcription.FAILED, transcriptionError = reason) })
-        }
-        val latest = store.get(entry.id) ?: return null
-        // The user typed a text or deleted the entry while the request ran: keep their change.
-        if (latest.transcription != Transcription.PENDING || latest.deleted) return null
-        store.update(update(latest))
-        return store.get(entry.id)
-    }
+    /** New recordings without text, and Thai text without an English meaning yet. */
+    private fun needsProcessing(e: VocabEntry): Boolean =
+        e.transcription == Transcription.PENDING || (e.thai != null && e.english == null)
 
     private fun pull(api: SupabaseApi, token: String, userId: String, store: VocabStore) {
         val rows = api.select(

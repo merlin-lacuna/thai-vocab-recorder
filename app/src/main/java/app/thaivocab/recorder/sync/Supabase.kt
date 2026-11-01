@@ -112,11 +112,13 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         )
     }
 
-    /** Calls the "transcribe" Edge Function, which returns {"text": "..."} for a stored clip. */
-    fun transcribe(token: String, audioPath: String): String {
-        val body = JSONObject().put("audio_path", audioPath).toString().toByteArray()
-        val json = JSONObject(request("POST", "/functions/v1/transcribe", token, "application/json", body))
-        return json.optString("text", "")
+    /**
+     * Calls the "process" Edge Function for one item: transcription (ElevenLabs) and
+     * enrichment (Gemini). Returns the updated database row.
+     */
+    fun process(token: String, itemId: String): JSONObject {
+        val body = JSONObject().put("item_id", itemId).toString().toByteArray()
+        return JSONObject(request("POST", "/functions/v1/process", token, "application/json", body))
     }
 
     /** Reads rows through the REST API. [query] is the PostgREST query string. */
@@ -151,7 +153,7 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         try {
             conn.requestMethod = method
             conn.connectTimeout = 15_000
-            conn.readTimeout = 30_000
+            conn.readTimeout = 60_000 // the "process" function calls two AI services
             conn.setRequestProperty("apikey", apiKey)
             conn.setRequestProperty("Authorization", "Bearer ${token ?: apiKey}")
             contentType?.let { conn.setRequestProperty("Content-Type", it) }

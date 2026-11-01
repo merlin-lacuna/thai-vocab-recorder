@@ -201,6 +201,15 @@ class VocabStore private constructor(context: Context) :
         refresh()
     }
 
+    /** Saves a row returned by the server, unless the local entry has newer unsent changes. */
+    @Synchronized
+    fun applyRemote(remote: VocabEntry) {
+        val local = get(remote.id)
+        if (local != null && local.dirty) return
+        writableDatabase.insertWithOnConflict("entries", null, remote.toValues(), SQLiteDatabase.CONFLICT_REPLACE)
+        refresh()
+    }
+
     @Synchronized
     fun refresh() {
         _entries.value = readableDatabase.query(

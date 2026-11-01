@@ -167,6 +167,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 alternatives = alts,
                 notes = notes.trim().ifEmpty { null },
                 transcription = if (newThai != entry.thai) Transcription.MANUAL else entry.transcription,
+                // New Thai text: the server adds a new meaning and romanization.
+                english = if (newThai != entry.thai) null else entry.english,
+                romanization = if (newThai != entry.thai) null else entry.romanization,
             )
         )
         SyncWorker.schedule(getApplication())
