@@ -20,30 +20,53 @@ import java.io.File
 import kotlin.coroutines.resume
 
 /**
- * Converts a recorded WAV clip into Thai text with the Android speech recogniser
- * (Google speech services on a Pixel).
+ * Converts a recorded WAV clip into Thai text with the Android speech recognisers.
  *
  * The clip is fed to the recogniser through EXTRA_AUDIO_SOURCE (Android 13+), so the
  * microphone is used only once, by our own recorder, and the audio file is kept.
+ * First the default (Google online) recogniser is tried, then the on-device recogniser.
  */
 class ThaiTranscriber(private val context: Context) {
 
-    /** Returns the candidate transcripts, best first. Empty list when recognition fails. */
-    suspend fun transcribe(wav: File): List<String> {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            Log.w(TAG, "No speech recognition service on this device")
-            return emptyList()
+    /** [texts] holds the candidates, best first. When it is empty, [error] says why. */
+    data class Outcome(val texts: List<String>, val error: String?)
+
+    suspend fun transcribe(wav: File): Outcome {
+        val errors = mutableListOf<String>()
+
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            val r = attempt(wav, onDevice = false)
+            if (r.texts.isNotEmpty()) return r
+            errors += "online: ${r.error}"
+        } else {
+            errors += "online: not available"
         }
-        return withTimeoutOrNull(TIMEOUT_MS) {
-            withContext(Dispatchers.Main) { recognise(wav) }
-        } ?: emptyList()
+
+        if (SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+            val r = attempt(wav, onDevice = true)
+            if (r.texts.isNotEmpty()) return r
+            errors += "on-device: ${r.error}"
+        } else {
+            errors += "on-device: not available"
+        }
+
+        return Outcome(emptyList(), errors.joinToString("; "))
     }
 
-    private suspend fun recognise(wav: File): List<String> = suspendCancellableCoroutine { cont ->
-        val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+    private suspend fun attempt(wav: File, onDevice: Boolean): Outcome =
+        withTimeoutOrNull(TIMEOUT_MS) {
+            withContext(Dispatchers.Main) { recognise(wav, onDevice) }
+        } ?: Outcome(emptyList(), "timeout")
+
+    private suspend fun recognise(wav: File, onDevice: Boolean): Outcome = suspendCancellableCoroutine { cont ->
+        val recognizer = if (onDevice) {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        } else {
+            SpeechRecognizer.createSpeechRecognizer(context)
+        }
         val (readSide, writeSide) = ParcelFileDescriptor.createPipe()
 
-        fun finish(result: List<String>) {
+        fun finish(result: Outcome) {
             if (cont.isActive) cont.resume(result)
             recognizer.destroy()
             runCatching { readSide.close() }
@@ -52,12 +75,13 @@ class ThaiTranscriber(private val context: Context) {
         recognizer.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) {
                 val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-                finish(list.map { it.trim() }.filter { it.isNotEmpty() }.distinct())
+                    .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                finish(Outcome(list, if (list.isEmpty()) "no words found" else null))
             }
 
             override fun onError(error: Int) {
-                Log.w(TAG, "Recognition error $error")
-                finish(emptyList())
+                Log.w(TAG, "Recognition error $error (onDevice=$onDevice)")
+                finish(Outcome(emptyList(), errorName(error)))
             }
 
             override fun onReadyForSpeech(params: Bundle?) = Unit
@@ -107,6 +131,25 @@ class ThaiTranscriber(private val context: Context) {
 
     private companion object {
         const val TAG = "ThaiTranscriber"
-        const val TIMEOUT_MS = 25_000L
+        const val TIMEOUT_MS = 20_000L
+
+        fun errorName(code: Int): String = when (code) {
+            SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network timeout"
+            SpeechRecognizer.ERROR_NETWORK -> "network error"
+            SpeechRecognizer.ERROR_AUDIO -> "audio error"
+            SpeechRecognizer.ERROR_SERVER -> "server error"
+            SpeechRecognizer.ERROR_CLIENT -> "client error"
+            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "no speech heard"
+            SpeechRecognizer.ERROR_NO_MATCH -> "no match"
+            SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "recogniser busy"
+            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "no permission"
+            SpeechRecognizer.ERROR_TOO_MANY_REQUESTS -> "too many requests"
+            SpeechRecognizer.ERROR_SERVER_DISCONNECTED -> "server disconnected"
+            SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "Thai not supported"
+            SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "Thai not downloaded"
+            SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT -> "cannot check support"
+            SpeechRecognizer.ERROR_CANNOT_LISTEN_TO_DOWNLOAD_EVENTS -> "cannot listen to download events"
+            else -> "error $code"
+        }
     }
 }

@@ -43,6 +43,8 @@ data class VocabEntry(
     val capturedAt: Long,
     val updatedAt: Long,
     val context: CaptureContext = CaptureContext.FIELD,
+    /** Why speech recognition failed, if it did. */
+    val transcriptionError: String? = null,
     val transcription: Transcription,
     /** True when the local version has changes that are not in the cloud yet. */
     val dirty: Boolean,
@@ -52,7 +54,7 @@ data class VocabEntry(
 
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 2) {
+    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 3) {
 
     private val _entries = MutableStateFlow<List<VocabEntry>>(emptyList())
 
@@ -78,7 +80,8 @@ class VocabStore private constructor(context: Context) :
                 dirty INTEGER NOT NULL DEFAULT 1,
                 audio_uploaded INTEGER NOT NULL DEFAULT 0,
                 deleted INTEGER NOT NULL DEFAULT 0,
-                context TEXT NOT NULL DEFAULT 'FIELD'
+                context TEXT NOT NULL DEFAULT 'FIELD',
+                transcription_error TEXT
             )
             """.trimIndent()
         )
@@ -86,6 +89,7 @@ class VocabStore private constructor(context: Context) :
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) db.execSQL("ALTER TABLE entries ADD COLUMN context TEXT NOT NULL DEFAULT 'FIELD'")
+        if (oldVersion < 3) db.execSQL("ALTER TABLE entries ADD COLUMN transcription_error TEXT")
     }
 
     @Synchronized
@@ -166,6 +170,7 @@ class VocabStore private constructor(context: Context) :
         put("audio_uploaded", if (audioUploaded) 1 else 0)
         put("deleted", if (deleted) 1 else 0)
         put("context", context.name)
+        put("transcription_error", transcriptionError)
     }
 
     private fun Cursor.toEntry(): VocabEntry {
@@ -185,6 +190,7 @@ class VocabStore private constructor(context: Context) :
             audioUploaded = long("audio_uploaded") == 1L,
             deleted = long("deleted") == 1L,
             context = runCatching { CaptureContext.valueOf(str("context")!!) }.getOrDefault(CaptureContext.FIELD),
+            transcriptionError = str("transcription_error"),
         )
     }
 

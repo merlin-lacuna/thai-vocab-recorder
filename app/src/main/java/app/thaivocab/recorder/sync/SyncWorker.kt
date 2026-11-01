@@ -93,6 +93,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         put("source", SOURCE)
         put("context", context.dbValue)
         put("teacher", context.teacher ?: JSONObject.NULL)
+        put("transcription_error", transcriptionError ?: JSONObject.NULL)
         put("transcription_status", transcription.name.lowercase())
         put("captured_at", Instant.ofEpochMilli(capturedAt).toString())
         put("updated_at", Instant.ofEpochMilli(updatedAt).toString())

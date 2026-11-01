@@ -47,6 +47,7 @@ fun EditDialog(
     onSave: (thai: String, notes: String) -> Unit,
     onDelete: () -> Unit,
     onPlay: () -> Unit,
+    onRetry: () -> Unit = {},
 ) {
     var thai by remember { mutableStateOf(entry.thai.orEmpty()) }
     var notes by remember { mutableStateOf(entry.notes.orEmpty()) }
@@ -77,6 +78,9 @@ fun EditDialog(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         choices.forEach { c -> AssistChip(onClick = { thai = c }, label = { Text(c, fontSize = 18.sp) }) }
                     }
+                }
+                if (entry.audioFile != null) {
+                    TextButton(onClick = onRetry) { Text("Try recognition again") }
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(

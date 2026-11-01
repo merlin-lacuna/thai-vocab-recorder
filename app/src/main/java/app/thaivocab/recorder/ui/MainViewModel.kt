@@ -98,17 +98,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.insert(entry)
         contextSetting.touch()
 
+        transcribe(id, file)
+    }
+
+    /** Runs speech recognition again, for an entry where it failed. */
+    fun retryTranscription(entry: VocabEntry) {
+        val file = entry.audioFile?.let { File(it) }
+        if (file == null || !file.exists()) return showMessage("Audio file is missing")
+        store.update(entry.copy(transcription = Transcription.PENDING, transcriptionError = null))
+        transcribe(entry.id, file)
+    }
+
+    private fun transcribe(id: String, file: File) {
         viewModelScope.launch {
-            val results = transcriber.transcribe(file)
+            val outcome = transcriber.transcribe(file)
+            val results = outcome.texts
             val latest = store.get(id) ?: return@launch
             if (latest.deleted) return@launch
             // If the user typed a text while recognition ran, keep their text.
             val updated = if (latest.transcription == Transcription.MANUAL) {
                 latest.copy(alternatives = results)
             } else if (results.isEmpty()) {
-                latest.copy(transcription = Transcription.FAILED)
+                latest.copy(transcription = Transcription.FAILED, transcriptionError = outcome.error)
             } else {
-                latest.copy(thai = results.first(), alternatives = results.drop(1), transcription = Transcription.DONE)
+                latest.copy(
+                    thai = results.first(), alternatives = results.drop(1),
+                    transcription = Transcription.DONE, transcriptionError = null,
+                )
             }
             store.update(updated)
             SyncWorker.schedule(getApplication())

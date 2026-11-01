@@ -132,6 +132,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
             onSave = { thai, notes -> vm.saveEdit(entry, thai, notes); editing = null },
             onDelete = { vm.delete(entry); editing = null },
             onPlay = { vm.play(entry) },
+            onRetry = { vm.retryTranscription(entry); editing = null },
         )
     }
     if (typing) {
@@ -293,7 +294,19 @@ private fun EntryRow(entry: VocabEntry, onPlay: () -> Unit, onClick: () -> Unit)
                     Spacer(Modifier.width(8.dp))
                     Text("Recognising…", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                else -> Text("(no text – tap to type)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> Column {
+                    Text(
+                        "Thai not recognised – tap to type it or try again",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    entry.transcriptionError?.let {
+                        Text(
+                            "Reason: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             if (entry.alternatives.isNotEmpty()) {
                 Text(

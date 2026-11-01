@@ -36,7 +36,8 @@ object SampleData {
         entry("1", null, minutesAgo = 0, transcription = Transcription.PENDING, dirty = true),
         entry("2", "ตลาดน้ำ", listOf("ตลาด น้ำ", "ตลาดนัด"), notes = "floating market – boat driver", minutesAgo = 4, dirty = true),
         entry("3", "ขอบคุณครับ", minutesAgo = 35, context = CaptureContext.LINGPING),
-        entry("4", null, minutesAgo = 80, transcription = Transcription.FAILED),
+        entry("4", null, minutesAgo = 80, transcription = Transcription.FAILED)
+            .copy(transcriptionError = "online: no match; on-device: Thai not downloaded"),
         entry("5", "ห้ามจอดรถ", notes = "sign on the gate", minutesAgo = 120, transcription = Transcription.MANUAL, audio = false),
         entry("6", "อร่อยมาก", listOf("อร่อย มาก"), minutesAgo = 300, context = CaptureContext.KRU_BOOM),
     )
