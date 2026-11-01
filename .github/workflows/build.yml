@@ -51,7 +51,8 @@ jobs:
       # reads version.json from there to offer "Install update" with one tap.
       - name: Write version.json
         if: github.ref_name == github.event.repository.default_branch
-        run: echo '{"versionCode": ${{ github.run_number }}, "versionName": "0.1.${{ github.run_number }}"}' > version.json
+        run: |
+          echo '{"versionCode": ${{ github.run_number }}, "versionName": "0.1.${{ github.run_number }}"}' > version.json
 
       - name: Publish latest release
         if: github.ref_name == github.event.repository.default_branch
