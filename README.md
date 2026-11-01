@@ -107,6 +107,22 @@ user sees only their own items. To play an audio clip, create a signed URL for
 Rule for every new input source: write to `vocab_items`, set `source` to a new name,
 and use `enrichment_status = 'new'` so that the enrichment step finds the new items.
 
+## See the screens without a phone
+
+**Android Studio (fastest):**
+
+1. Install Android Studio from <https://developer.android.com/studio> and open this
+   folder (**File → Open**). The first Gradle sync downloads the Android SDK and takes
+   some minutes.
+2. Open `app/src/main/java/app/thaivocab/recorder/ui/Previews.kt` and click **Split**
+   (top right of the editor). The screens appear with sample Thai entries: list,
+   dark mode, recording, first start, and the edit dialog.
+3. Change colours, sizes or text in `MainScreen.kt`, `Dialogs.kt` or `Theme.kt`.
+   The previews update automatically.
+
+**Screenshots from GitHub:** every build also saves PNG screenshots of the main
+screens under **Actions → Build APK → (run) → Artifacts → screenshots**.
+
 ## Build on your own computer
 
 Open the project in Android Studio, or run:
