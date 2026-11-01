@@ -30,8 +30,8 @@ class SupabaseConfig private constructor(context: Context) {
     }
 
     private fun read() = State(
-        url = prefs.getString("url", null) ?: DEFAULT_URL,
-        apiKey = prefs.getString("api_key", "") ?: "",
+        url = prefs.getString("url", null)?.ifBlank { null } ?: DEFAULT_URL,
+        apiKey = prefs.getString("api_key", null)?.ifBlank { null } ?: DEFAULT_API_KEY,
         email = prefs.getString("email", "") ?: "",
         userId = prefs.getString("user_id", null),
         refreshToken = prefs.getString("refresh_token", null),
@@ -55,6 +55,12 @@ class SupabaseConfig private constructor(context: Context) {
     companion object {
         /** The project of this app. Can be changed in the set-up window. */
         const val DEFAULT_URL = "https://vazojhdllcilzbdtavww.supabase.co"
+
+        /**
+         * Publishable key of the project. Supabase designs this key to be public: the
+         * Row Level Security rules protect the data, and every app user must sign in.
+         */
+        const val DEFAULT_API_KEY = "sb_publishable_zQgiMRTpOkwrAMgFVb-EgA_wf8EFdSt"
 
         @Volatile private var instance: SupabaseConfig? = null
         fun get(context: Context): SupabaseConfig =
