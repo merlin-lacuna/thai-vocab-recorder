@@ -119,12 +119,30 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         val rows = api.select(
             token, TABLE,
             "select=id,thai,thai_alternatives,notes,audio_path,context,teacher,transcription_status," +
-                "transcription_error,english,romanization,captured_at,updated_at,deleted_at" +
+                "transcription_error,english,romanization,captured_at,updated_at,deleted_at," +
+                "enrichment_status,enrichment_error" +
                 "&order=captured_at.desc&limit=$PULL_LIMIT",
         )
         val audioDir = File(applicationContext.filesDir, "audio")
         val remote = (0 until rows.length()).map { i -> rows.getJSONObject(i).toEntry(audioDir) }
         store.mergeFromServer(remote, complete = remote.size < PULL_LIMIT)
+
+        // Older words (or words from other sources) that have Thai text but were never
+        // enriched: let the server add spelling check, romanization and English.
+        // Rows where enrichment failed before are skipped, so a broken key costs nothing.
+        (0 until rows.length()).map { rows.getJSONObject(it) }
+            .filter {
+                it.isNull("deleted_at") && !it.isNull("thai") && it.isNull("enrichment_error") &&
+                    it.optString("enrichment_status") == "new"
+            }
+            .take(ENRICH_BATCH)
+            .forEach { row ->
+                try {
+                    store.applyRemote(api.process(token, row.getString("id")).toEntry(audioDir))
+                } catch (e: HttpException) {
+                    Log.w(TAG, "process failed for ${row.getString("id")}", e)
+                }
+            }
 
         // Fetch audio that is missing on the phone, newest first.
         remote.asSequence()
@@ -202,6 +220,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         const val SOURCE = "field_recorder"
         private const val PULL_LIMIT = 500
         private const val AUDIO_DOWNLOAD_LIMIT = 100
+        private const val ENRICH_BATCH = 20
 
         /** Asks WorkManager to run a sync as soon as there is a network connection. */
         fun schedule(context: Context, delaySeconds: Long = 0) {
