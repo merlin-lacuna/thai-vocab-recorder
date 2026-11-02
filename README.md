@@ -90,6 +90,11 @@ The app stores only a login token; the password is not saved.
   with `enrichment_status = 'reviewed'` are never changed by the AI.
   Keys are stored only in Supabase (**Edge Functions → Secrets**): `ELEVENLABS_API_KEY`
   and `GEMINI_API_KEY`. Errors are saved in `transcription_error` / `enrichment_error`.
+* **Native speaker switch** (left of the record button): when it is ON, the button turns
+  blue, a new recording is saved as the native pronunciation (`native_audio_path`, with
+  `native_audio_source` = `human:Kru Boom`, `human:Kru Ae` or `human:native speaker`), and
+  the play buttons play native clips where they exist. A blue speaker icon marks words
+  that have a native clip. The switch turns off after 4 hours without a recording.
 * **Waveform and playback:** bars show the microphone level while you record. During
   playback, a ring around the play button shows the progress; tap again to stop.
 * **Offline first:** each entry is first saved in a local SQLite database on the phone.

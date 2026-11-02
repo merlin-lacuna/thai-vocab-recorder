@@ -70,7 +70,16 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     }
                     audioUploaded = true
                 }
-                api.upsert(session.accessToken, TABLE, entry.toRow(audioPath))
+                // A native speaker's recording made on this phone.
+                var toSend = entry
+                if (!entry.deleted && entry.nativeAudioFile != null && !entry.nativeAudioUploaded) {
+                    val path = entry.nativeAudioPath ?: "${session.userId}/native/${entry.id}.wav"
+                    val file = File(entry.nativeAudioFile)
+                    if (file.exists()) api.uploadFile(session.accessToken, AUDIO_BUCKET, path, file, "audio/wav")
+                    store.markNativeUploaded(entry.id, path)
+                    toSend = entry.copy(nativeAudioPath = path, nativeAudioUploaded = true)
+                }
+                api.upsert(session.accessToken, TABLE, toSend.toRow(audioPath))
 
                 // Server step: Thai text from ElevenLabs, then spelling, romanization and
                 // English from Gemini. Network problems are thrown, so the entry stays
@@ -120,7 +129,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             token, TABLE,
             "select=id,thai,thai_alternatives,notes,audio_path,context,teacher,transcription_status," +
                 "transcription_error,english,romanization,captured_at,updated_at,deleted_at," +
-                "enrichment_status,enrichment_error" +
+                "enrichment_status,enrichment_error,source,native_audio_path,native_audio_source" +
                 "&order=captured_at.desc&limit=$PULL_LIMIT",
         )
         val audioDir = File(applicationContext.filesDir, "audio")
@@ -142,6 +151,18 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 } catch (e: HttpException) {
                     Log.w(TAG, "process failed for ${row.getString("id")}", e)
                 }
+            }
+
+        // Fetch native pronunciation clips that are missing on the phone, newest first.
+        remote.asSequence()
+            .filter { !it.deleted && it.nativeAudioPath != null && it.nativeAudioFile != null && !File(it.nativeAudioFile).exists() }
+            .take(AUDIO_DOWNLOAD_LIMIT)
+            .forEach { e ->
+                val target = File(e.nativeAudioFile!!)
+                target.parentFile?.mkdirs()
+                val tmp = File(target.path + ".part")
+                tmp.writeBytes(api.downloadFile(token, AUDIO_BUCKET, e.nativeAudioPath!!))
+                tmp.renameTo(target)
             }
 
         // Fetch audio that is missing on the phone, newest first.
@@ -195,6 +216,13 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             transcriptionError = str("transcription_error"),
             english = str("english"),
             romanization = str("romanization"),
+            source = str("source") ?: SOURCE,
+            nativeAudioPath = str("native_audio_path"),
+            nativeAudioSource = str("native_audio_source"),
+            nativeAudioFile = str("native_audio_path")?.let { path ->
+                File(audioDir, "native_$id.${path.substringAfterLast('.', "wav")}").absolutePath
+            },
+            nativeAudioUploaded = true,
         )
     }
 
@@ -204,7 +232,11 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         put("thai_alternatives", JSONArray(alternatives))
         put("notes", notes ?: JSONObject.NULL)
         put("audio_path", audioPath ?: JSONObject.NULL)
-        put("source", SOURCE)
+        put("source", source)
+        // Native clip fields only when known, so a stale phone never erases a clip that a
+        // batch job added in the meantime.
+        nativeAudioPath?.let { put("native_audio_path", it) }
+        nativeAudioSource?.let { put("native_audio_source", it) }
         put("context", context.dbValue)
         put("teacher", context.teacher ?: JSONObject.NULL)
         put("transcription_error", transcriptionError ?: JSONObject.NULL)

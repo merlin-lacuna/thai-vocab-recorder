@@ -36,7 +36,7 @@ object SampleData {
         entry("1", null, minutesAgo = 0, transcription = Transcription.PENDING, dirty = true),
         entry("2", "ตลาดน้ำ", listOf("ตลาด น้ำ", "ตลาดนัด"), notes = "floating market – boat driver", minutesAgo = 4, dirty = true),
         entry("3", "ขอบคุณครับ", minutesAgo = 35, context = CaptureContext.LINGPING)
-            .copy(romanization = "khàwp-khun khráp", english = "thank you"),
+            .copy(romanization = "kɔ̀ɔp-kun kráp", english = "thank you", nativeAudioFile = "/sample/native_3.wav"),
         entry("4", null, minutesAgo = 80, transcription = Transcription.FAILED)
             .copy(transcriptionError = "online: no match; on-device: Thai not downloaded"),
         entry("5", "ห้ามจอดรถ", notes = "sign on the gate", minutesAgo = 120, transcription = Transcription.MANUAL, audio = false),
@@ -65,6 +65,7 @@ fun PreviewRecording() = ThaiVocabTheme(darkTheme = false) {
     MainContent(
         entries = SampleData.entries.drop(1), recording = true, message = null, connected = true, syncError = null,
         captureContext = CaptureContext.KRU_AE,
+        nativeMode = true,
         levels = List(60) { i -> if (i < 15) 0f else (0.05f + 0.6f * kotlin.math.abs(kotlin.math.sin(i / 3.0)).toFloat()) },
         playingId = null,
     )

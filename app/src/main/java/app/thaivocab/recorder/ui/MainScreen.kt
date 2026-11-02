@@ -86,6 +86,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
@@ -109,6 +111,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val playProgress = vm.playProgress.collectAsStateWithLifecycle()
     val update by vm.update.collectAsStateWithLifecycle()
     val updateProgress by vm.updateProgress.collectAsStateWithLifecycle()
+    val nativeMode by vm.nativeMode.collectAsStateWithLifecycle()
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
@@ -140,6 +143,8 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         updateBuild = update?.versionCode,
         updateProgress = updateProgress,
         onUpdateClick = vm::installUpdate,
+        nativeMode = nativeMode,
+        onNativeModeChange = vm::setNativeMode,
         onSyncBarClick = { showSetup = true },
         onEntryClick = { editing = it },
         onPlay = vm::play,
@@ -190,6 +195,8 @@ fun MainContent(
     updateBuild: Long? = null,
     updateProgress: Float? = null,
     onUpdateClick: () -> Unit = {},
+    nativeMode: Boolean = false,
+    onNativeModeChange: (Boolean) -> Unit = {},
     onSyncBarClick: () -> Unit = {},
     onEntryClick: (VocabEntry) -> Unit = {},
     onPlay: (VocabEntry) -> Unit = {},
@@ -238,6 +245,7 @@ fun MainContent(
                             EntryRow(
                                 entry,
                                 playing = entry.id == playingId,
+                                nativeMode = nativeMode,
                                 playProgress = playProgress,
                                 onPlay = { onPlay(entry) },
                                 onClick = { onEntryClick(entry) },
@@ -288,8 +296,14 @@ fun MainContent(
                     .padding(bottom = 28.dp),
                 contentAlignment = Alignment.Center,
             ) {
+                NativeToggle(
+                    on = nativeMode,
+                    onChange = onNativeModeChange,
+                    modifier = Modifier.align(Alignment.CenterStart).padding(start = 16.dp),
+                )
                 RecordButton(
                     recording = recording,
+                    native = nativeMode,
                     onStart = onStartRecording,
                     onStop = onStopRecording,
                     hasPermission = hasMicPermission,
@@ -406,6 +420,7 @@ private val timeFormat = SimpleDateFormat("d MMM, HH:mm", Locale.getDefault())
 private fun EntryRow(
     entry: VocabEntry,
     playing: Boolean,
+    nativeMode: Boolean,
     playProgress: () -> Float,
     onPlay: () -> Unit,
     onClick: () -> Unit,
@@ -460,6 +475,13 @@ private fun EntryRow(
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (entry.nativeAudioFile != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Filled.RecordVoiceOver, contentDescription = "Has native pronunciation",
+                        Modifier.size(14.dp), tint = NativeBlue,
+                    )
+                }
                 if (entry.dirty) {
                     Spacer(Modifier.width(6.dp))
                     Icon(
@@ -469,7 +491,9 @@ private fun EntryRow(
                 }
             }
         }
-        if (entry.audioFile != null) {
+        if (entry.audioFile != null || entry.nativeAudioFile != null) {
+            // Which clip the button plays: the switch decides, the other one is the fallback.
+            val playsNative = entry.nativeAudioFile != null && (nativeMode || entry.audioFile == null)
             IconButton(onClick = onPlay, modifier = Modifier.size(56.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     if (playing) {
@@ -486,7 +510,11 @@ private fun EntryRow(
                         if (playing) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                         contentDescription = if (playing) "Stop" else "Play",
                         Modifier.size(30.dp),
-                        tint = if (playing) MaterialTheme.colorScheme.primary else LocalContentColor.current,
+                        tint = when {
+                            playsNative -> NativeBlue
+                            playing -> MaterialTheme.colorScheme.primary
+                            else -> LocalContentColor.current
+                        },
                     )
                 }
             }
@@ -521,10 +549,37 @@ private fun Waveform(levels: List<Float>, modifier: Modifier = Modifier) {
     }
 }
 
+private val NativeBlue = Color(0xFF1E88E5)
+
+/** "Native speaker" switch: recordings and playback use the native speaker's clips. */
+@Composable
+private fun NativeToggle(on: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onChange(!on) }
+            .background(if (on) NativeBlue.copy(alpha = 0.15f) else Color.Transparent)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            Icons.Filled.RecordVoiceOver, contentDescription = null, Modifier.size(28.dp),
+            tint = if (on) NativeBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (on) "Native\nON" else "Native\noff",
+            style = MaterialTheme.typography.labelSmall,
+            textAlign = TextAlign.Center,
+            color = if (on) NativeBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 /** The main control: press and hold to record, release to save. */
 @Composable
 private fun RecordButton(
     recording: Boolean,
+    native: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
     hasPermission: () -> Boolean,
@@ -554,7 +609,13 @@ private fun RecordButton(
         animationSpec = infiniteRepeatable(tween(450), RepeatMode.Reverse), label = "scale",
     )
 
-    val color = if (recording) Color(0xFFB71C1C) else Color(0xFFE53935)
+    // Red for my own recordings, blue for a native speaker's recording.
+    val color = when {
+        native && recording -> Color(0xFF0D47A1)
+        native -> NativeBlue
+        recording -> Color(0xFFB71C1C)
+        else -> Color(0xFFE53935)
+    }
     Box(
         Modifier
             .size(150.dp)

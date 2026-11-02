@@ -73,6 +73,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setContext(value: CaptureContext) = contextSetting.set(value)
 
+    val nativeMode: StateFlow<Boolean> = contextSetting.native
+    fun setNativeMode(value: Boolean) = contextSetting.setNative(value)
+    private var currentNative = false
+
     fun recheckContext() = contextSetting.recheck()
 
     private var pressedAt = 0L
@@ -83,7 +87,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         tailJob?.let { it.cancel(); tailJob = null; finishRecording() }
         if (recorder.isRecording) return
         val id = UUID.randomUUID().toString()
-        val file = File(getApplication<Application>().filesDir, "audio/$id.wav")
+        val native = contextSetting.native.value
+        val name = if (native) "native_$id.wav" else "$id.wav"
+        val file = File(getApplication<Application>().filesDir, "audio/$name")
         try {
             stopPlayback()
             _levels.value = emptyList()
@@ -96,6 +102,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         currentId = id
         currentFile = file
+        currentNative = native
         pressedAt = System.currentTimeMillis()
         _recording.value = true
     }
@@ -135,7 +142,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis()
         val entry = VocabEntry(
             id = id, thai = null, alternatives = emptyList(), notes = null,
-            audioFile = file.absolutePath, capturedAt = now, updatedAt = now,
+            // A native speaker's recording goes to the native fields, not to "my recording".
+            audioFile = if (currentNative) null else file.absolutePath,
+            nativeAudioFile = if (currentNative) file.absolutePath else null,
+            nativeAudioUploaded = !currentNative,
+            nativeAudioSource = if (currentNative) {
+                "human:" + (contextSetting.current.value.teacher?.let { "Kru $it" } ?: "native speaker")
+            } else null,
+            capturedAt = now, updatedAt = now,
             transcription = Transcription.PENDING, dirty = true, audioUploaded = false, deleted = false,
             context = contextSetting.current.value,
         )
@@ -147,7 +161,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Runs speech recognition again, for an entry where it failed. */
     fun retryTranscription(entry: VocabEntry) {
-        if (entry.audioFile == null) return
+        if (entry.audioFile == null && entry.nativeAudioFile == null) return
         store.update(entry.copy(transcription = Transcription.PENDING, transcriptionError = null))
         SyncWorker.schedule(getApplication())
     }
@@ -193,7 +207,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Plays the clip, or stops it when it is already playing. */
     fun play(entry: VocabEntry) {
         if (_playingId.value == entry.id) return stopPlayback()
-        val path = entry.audioFile ?: return
+        // The "Native speaker" switch decides which clip plays; the other is the fallback.
+        val path = (if (nativeMode.value) entry.nativeAudioFile ?: entry.audioFile
+                    else entry.audioFile ?: entry.nativeAudioFile) ?: return
         if (!File(path).exists()) {
             syncNow()
             return showMessage("Audio is still downloading – try again in a moment")

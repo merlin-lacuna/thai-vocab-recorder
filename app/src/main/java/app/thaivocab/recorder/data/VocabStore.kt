@@ -50,6 +50,13 @@ data class VocabEntry(
     /** Filled in the database (by hand or by an enrichment step); read-only on the phone. */
     val english: String? = null,
     val romanization: String? = null,
+    /** Input that created the row; kept when the phone edits rows from other sources. */
+    val source: String = "field_recorder",
+    /** Native Thai pronunciation: local file, path in the cloud, and who made it. */
+    val nativeAudioFile: String? = null,
+    val nativeAudioPath: String? = null,
+    val nativeAudioSource: String? = null,
+    val nativeAudioUploaded: Boolean = true,
     val transcription: Transcription,
     /** True when the local version has changes that are not in the cloud yet. */
     val dirty: Boolean,
@@ -59,7 +66,7 @@ data class VocabEntry(
 
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 4) {
+    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 5) {
 
     private val _entries = MutableStateFlow<List<VocabEntry>>(emptyList())
 
@@ -88,7 +95,12 @@ class VocabStore private constructor(context: Context) :
                 context TEXT NOT NULL DEFAULT 'FIELD',
                 transcription_error TEXT,
                 english TEXT,
-                romanization TEXT
+                romanization TEXT,
+                source TEXT NOT NULL DEFAULT 'field_recorder',
+                native_audio_file TEXT,
+                native_audio_path TEXT,
+                native_audio_source TEXT,
+                native_audio_uploaded INTEGER NOT NULL DEFAULT 1
             )
             """.trimIndent()
         )
@@ -100,6 +112,13 @@ class VocabStore private constructor(context: Context) :
         if (oldVersion < 4) {
             db.execSQL("ALTER TABLE entries ADD COLUMN english TEXT")
             db.execSQL("ALTER TABLE entries ADD COLUMN romanization TEXT")
+        }
+        if (oldVersion < 5) {
+            db.execSQL("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'field_recorder'")
+            db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_file TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_path TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_source TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_uploaded INTEGER NOT NULL DEFAULT 1")
         }
     }
 
@@ -144,6 +163,7 @@ class VocabStore private constructor(context: Context) :
         val unchanged = e.updatedAt == uploadedUpdatedAt
         if (unchanged && e.deleted) {
             e.audioFile?.let { File(it).delete() }
+            e.nativeAudioFile?.let { File(it).delete() }
             writableDatabase.delete("entries", "id = ?", arrayOf(id))
         } else {
             val values = ContentValues().apply {
@@ -153,6 +173,15 @@ class VocabStore private constructor(context: Context) :
             writableDatabase.update("entries", values, "id = ?", arrayOf(id))
         }
         refresh()
+    }
+
+    @Synchronized
+    fun markNativeUploaded(id: String, path: String) {
+        val values = ContentValues().apply {
+            put("native_audio_uploaded", 1)
+            put("native_audio_path", path)
+        }
+        writableDatabase.update("entries", values, "id = ?", arrayOf(id))
     }
 
     @Synchronized
@@ -235,6 +264,11 @@ class VocabStore private constructor(context: Context) :
         put("transcription_error", transcriptionError)
         put("english", english)
         put("romanization", romanization)
+        put("source", source)
+        put("native_audio_file", nativeAudioFile)
+        put("native_audio_path", nativeAudioPath)
+        put("native_audio_source", nativeAudioSource)
+        put("native_audio_uploaded", if (nativeAudioUploaded) 1 else 0)
     }
 
     private fun Cursor.toEntry(): VocabEntry {
@@ -257,6 +291,11 @@ class VocabStore private constructor(context: Context) :
             transcriptionError = str("transcription_error"),
             english = str("english"),
             romanization = str("romanization"),
+            source = str("source") ?: "field_recorder",
+            nativeAudioFile = str("native_audio_file"),
+            nativeAudioPath = str("native_audio_path"),
+            nativeAudioSource = str("native_audio_source"),
+            nativeAudioUploaded = long("native_audio_uploaded") == 1L,
         )
     }
 

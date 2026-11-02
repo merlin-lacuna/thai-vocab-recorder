@@ -58,7 +58,7 @@ fun EditDialog(
         title = {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Text("Edit")
-                if (entry.audioFile != null) {
+                if ((entry.audioFile != null || entry.nativeAudioFile != null)) {
                     IconButton(onClick = onPlay) { Icon(Icons.Filled.PlayArrow, contentDescription = "Play") }
                 }
             }
@@ -79,7 +79,7 @@ fun EditDialog(
                         choices.forEach { c -> AssistChip(onClick = { thai = c }, label = { Text(c, fontSize = 18.sp) }) }
                     }
                 }
-                if (entry.audioFile != null) {
+                if ((entry.audioFile != null || entry.nativeAudioFile != null)) {
                     TextButton(onClick = onRetry) { Text("Try recognition again") }
                 }
                 Spacer(Modifier.height(8.dp))

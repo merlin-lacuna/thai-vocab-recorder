@@ -4,7 +4,8 @@
 // Output: the updated vocab_items row (JSON object)
 //
 // Steps, for one vocabulary item that belongs to the caller:
-//   1. Transcription: if the item has an audio clip and no Thai text yet, send the clip to
+//   1. Transcription: if the item has an audio clip (the learner's own, or else a native
+//      speaker's recording made with the app's "Native speaker" switch) and no Thai text yet, send the clip to
 //      ElevenLabs speech-to-text (Thai) and save the text.
 //   2. Enrichment: if the item has Thai text and is not marked "reviewed", ask Gemini for
 //      the standard spelling, romanization, English meaning, word/phrase and part of speech.
@@ -223,9 +224,10 @@ Deno.serve(async (req) => {
   const update: Row = {};
 
   // 1. Transcription
-  if (!row.thai && row.audio_path && row.transcription_status !== "manual") {
+  const clip: string | null = row.audio_path ?? row.native_audio_path;
+  if (!row.thai && clip && row.transcription_status !== "manual") {
     try {
-      const text = await transcribe(supabase, row.audio_path);
+      const text = await transcribe(supabase, clip);
       if (text) {
         Object.assign(update, { thai: text, transcription_status: "done", transcription_error: null });
       } else {
