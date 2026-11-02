@@ -87,7 +87,9 @@ Network hosts needed: `*.supabase.co` and `api.supabase.com`.
 | `thai` | text | Thai script. Null if only audio exists (the AI step transcribes it). |
 | `thai_alternatives` | text[] | Other spellings or recognition candidates; default `{}` |
 | `notes` | text | Free text, for example "Lesson 2026-10-28, 12:34–12:37" or an example sentence |
-| `audio_path` | text | `<user_id>/<id>.wav` in bucket `vocab-audio`, or null |
+| `audio_path` | text | The **learner's own** recording: `<user_id>/<id>.wav` in bucket `vocab-audio`, or null |
+| `native_audio_path` | text | A **native Thai pronunciation** of the item: `<user_id>/native/<id>.<ext>`, or null. See section 6. |
+| `native_audio_source` | text | Which API and voice made `native_audio_path`, e.g. `elevenlabs:eleven_v3:<voice id>` or `human:Kru Boom` |
 | `transcription_status` | text | `done` (machine transcript), `manual` (typed or verified by a human), `pending` (audio only, not transcribed yet) |
 | `romanization`, `english`, `entry_type`, `part_of_speech` | text | From the source data when it has them; otherwise null (see 4.0) |
 | `enrichment_status` | text | **Controls the AI step**, see 4.0: `new` = the AI step may process the row (also the phone app processes up to 20 such rows at each sync); `enriched` = filled by a machine, AI leaves it alone; `reviewed` = checked by a human, AI never changes it |
@@ -279,7 +281,7 @@ update vocab_items set deleted_at = now() where 'import-2026-11-05' = any(tags);
 
 ---
 
-## 5. Checklist
+## 5. Checklist (import)
 
 - [ ] Sign-in works (access A); password read from an environment variable
 - [ ] Items prepared; deterministic IDs; batch tag chosen
@@ -290,3 +292,43 @@ update vocab_items set deleted_at = now() where 'import-2026-11-05' = any(tags);
 - [ ] Audio uploaded, then rows upserted (≤ 500 per request)
 - [ ] `process` called for every new item (≤ 3 in parallel), leftovers retried
 - [ ] Checks in 4.8 run; report with numbers, errors and a sample sent to the user
+
+---
+
+## 6. Batch job: native pronunciation clips
+
+Purpose: each item gets a clip of a native Thai voice saying the word, next to the learner's
+own recording (`audio_path`), so the drill app can play both for comparison. The clips are
+made with a text-to-speech API that runs on the user's computer (ask the user for its
+address and parameters). Access as in section 2 (A for writes).
+
+1. **Select the items** that need a clip:
+   ```
+   GET $URL/rest/v1/vocab_items?select=id,user_id,thai,romanization,entry_type
+       &native_audio_path=is.null&thai=not.is.null&deleted_at=is.null&quality=eq.ok
+       &enrichment_status=in.(enriched,reviewed)&order=captured_at.desc&limit=1000
+   ```
+   Wait for `enriched`/`reviewed`: the AI step can still correct the spelling of rows with
+   `new`, and the clip must say the corrected word.
+2. **Make the clip** from `thai` (never from `romanization`). Use one voice for the whole
+   batch, so the drill app sounds consistent. Keep the format the API returns if it is
+   MP3, WAV or M4A (Android plays all of them); otherwise convert to MP3. Trim long silence
+   at the start and the end, but keep about 0.2 s.
+3. **Upload** to `vocab-audio` at `<user_id>/native/<id>.<ext>` with the matching
+   `Content-Type` (`audio/mpeg`, `audio/wav`, `audio/mp4`) and `x-upsert: true`.
+4. **Update the row** (only these two columns):
+   ```
+   PATCH $URL/rest/v1/vocab_items?id=eq.<id>
+   {"native_audio_path": "<user_id>/native/<id>.mp3",
+    "native_audio_source": "<api>:<model>:<voice>"}
+   ```
+   Many rows: one PATCH per row is fine; or upsert batches of at most 500 rows that contain
+   only `id`, `native_audio_path` and `native_audio_source`.
+5. **Re-runs:** step 1 selects only rows without a clip, so a re-run continues where the
+   last one stopped. To make all clips again with a new voice, the user must ask first;
+   then set `native_audio_path = null` for those rows and run the job again.
+6. **When the Thai text of an item changes later** (the user corrects it), its clip is out
+   of date. The database does not record when `thai` changed. So when the user says that
+   they corrected words, set `native_audio_path = null` for those rows and run the job again.
+7. **Report:** number of clips made, failures (with the Thai text), total audio length,
+   and 5 sample items so the user can listen to them.

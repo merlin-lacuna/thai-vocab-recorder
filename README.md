@@ -121,7 +121,7 @@ to the hand-written specification (171.0 – 171.11).
 | `english` | 4 | later | |
 | `entry_type` | 5 | later | `word` or `phrase` |
 | `part_of_speech` | 6 | later | `noun`, `verb`, `adjective`, `preposition`, `article`, `classifier`, `particle`, … |
-| `tts_audio_path` | 8 | later | computer voice (text-to-speech) for the drill app |
+| `native_audio_path`, `native_audio_source` | 8 | batch job | native Thai pronunciation (text-to-speech API or a native speaker) to compare with your own recording; `native_audio_source` names the API and voice. See `docs/batch-import.md`, section 6. |
 | `quality`, `duplicate_of` | 172, 173 | admin | `ok`, `junk`, `mispronounced`, `duplicate` |
 | `transcription_status` | – | recorder | `pending`, `done`, `failed`, `manual` |
 | `enrichment_status` | – | enrichment step | `new` → `enriched` → `reviewed` |
