@@ -113,11 +113,11 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
     }
 
     /**
-     * Calls the "process" Edge Function for one item: transcription (ElevenLabs) and
-     * enrichment (Gemini). Returns the updated database row.
+     * Calls the "process" Edge Function for one item. [step]: "transcribe" (ElevenLabs),
+     * "enrich" (Claude: spelling, romanization, English) or "all". Returns the updated row.
      */
-    fun process(token: String, itemId: String): JSONObject {
-        val body = JSONObject().put("item_id", itemId).toString().toByteArray()
+    fun process(token: String, itemId: String, step: String = "all"): JSONObject {
+        val body = JSONObject().put("item_id", itemId).put("step", step).toString().toByteArray()
         return JSONObject(request("POST", "/functions/v1/process", token, "application/json", body))
     }
 

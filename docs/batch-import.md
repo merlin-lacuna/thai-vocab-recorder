@@ -143,7 +143,7 @@ Notes:
   `done` for machine transcripts.
 - **Partial gaps in large numbers** (for example 2,000 rows without English): calling
   `process` once per row is slow. Ask the user first; a batch version of the AI step
-  (many rows per Gemini request) can be added to the Edge Function for this case.
+  (many rows per Claude request) can be added to the Edge Function for this case.
 
 ### 4.1 Prepare the items (offline, no writes)
 
@@ -199,7 +199,7 @@ Without writing anything, show the user:
 - duplicates found and what you will do with them,
 - how many rows use source values only, and how many need the AI step (and which part),
 - the estimated AI cost: ElevenLabs is billed per audio minute (only items without
-  Thai text are transcribed); Gemini costs much less than 1 US cent per 100 items.
+  Thai text are transcribed); Claude (`claude-sonnet-5-5`, effort `low`) costs about 50 US cents per 100 items; set `CLAUDE_MODEL` to `claude-haiku-5-5` for a large batch to cost about 3 US cents per 100 items.
 
 Wait for approval.
 
@@ -229,17 +229,20 @@ Content-Type: application/json
 
 What it does (see `supabase/functions/process/index.ts`):
 
-- `thai` is null and `audio_path` is set → ElevenLabs speech-to-text (Thai), saves `thai`.
-- Then, unless `enrichment_status = 'reviewed'` → Gemini returns standard spelling, strict
+- Body `{"item_id": "<id>", "step": "transcribe" | "enrich" | "all"}` (default `all`).
+  For an import with Thai text already present, use `"step": "enrich"`.
+- `transcribe`: `thai` is null and `audio_path` (or else `native_audio_path`) is set →
+  ElevenLabs speech-to-text (Thai), saves `thai`.
+- `enrich`: unless `enrichment_status = 'reviewed'` → Claude returns standard spelling, strict
   Paiboon+ romanization (ต = dt, ป = bp), English, `entry_type`, `part_of_speech`.
   A corrected spelling replaces `thai`; the original goes into `thai_alternatives`.
 - Returns the updated row. Takes about 3–6 seconds per item.
 
 Batch rules:
 
-- Run **2–3 requests in parallel at most**. Gemini sometimes answers "high demand" (503);
-  the function then tries other models, and if all are busy it saves **no** error and leaves
-  `enrichment_status = 'new'`.
+- Run **2–3 requests in parallel at most**. If the Anthropic API answers with a rate limit,
+  a server error or a timeout, the function saves **no** error and leaves
+  `enrichment_status = 'new'`, so the next run picks the row up again.
 - After the run, process the remaining rows again:
   `select id from vocab_items where enrichment_status = 'new' and thai is not null and enrichment_error is null and deleted_at is null`.
   Repeat with a pause (for example 1 minute) until nothing changes.

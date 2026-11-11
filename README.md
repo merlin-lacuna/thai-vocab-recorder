@@ -81,15 +81,21 @@ The app stores only a login token; the password is not saved.
   (default), *Just wondering* (looked up out of curiosity), *Lingping* (club), or a
   lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
   each entry. It returns to *Field work* after 4 hours without a recording.
-* **Thai text and meaning:** after upload, the app calls the Supabase Edge Function
-  `process` (`supabase/functions/process/`). For a new clip, the function sends the audio
-  to ElevenLabs speech-to-text (Thai). Then it sends the Thai text to Gemini, which returns
-  the standard spelling, romanization, English meaning, word/phrase and part of speech.
-  The function saves all of it in the database and returns it to the phone. A corrected
-  spelling replaces `thai`; the original transcript stays in `thai_alternatives`. Rows
-  with `enrichment_status = 'reviewed'` are never changed by the AI.
+* **Thai text and meaning (two steps):** after upload, the app calls the Supabase Edge
+  Function `process` (`supabase/functions/process/`) twice:
+  1. `step: "transcribe"` sends the clip to ElevenLabs speech-to-text (Thai). The list shows
+     the Thai text as soon as this step returns (a few seconds).
+  2. `step: "enrich"` sends the Thai text to Claude (Anthropic API), which returns the
+     standard spelling, strict Paiboon+ romanization, English meaning, word/phrase and part
+     of speech. Meanwhile the list shows "Getting meaning…".
+
+  The function saves the results in the database and returns the row to the phone. A
+  corrected spelling replaces `thai`; the original transcript stays in `thai_alternatives`.
+  Rows with `enrichment_status = 'reviewed'` are never changed by the AI.
   Keys are stored only in Supabase (**Edge Functions → Secrets**): `ELEVENLABS_API_KEY`
-  and `GEMINI_API_KEY`. Errors are saved in `transcription_error` / `enrichment_error`.
+  and `ANTHROPIC_API_KEY`. Optional: `CLAUDE_MODEL` (default `claude-sonnet-5-5`) and
+  `CLAUDE_EFFORT` (default `low`). Errors are saved in `transcription_error` /
+  `enrichment_error`.
 * **Native speaker switch** (left of the record button): when it is ON, the button turns
   blue, a new recording is saved as the native pronunciation (`native_audio_path`, with
   `native_audio_source` = `human:Kru Boom`, `human:Kru Ae` or `human:native speaker`), and

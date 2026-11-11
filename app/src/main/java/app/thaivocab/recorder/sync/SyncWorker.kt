@@ -81,24 +81,34 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 }
                 api.upsert(session.accessToken, TABLE, toSend.toRow(audioPath))
 
-                // Server step: Thai text from ElevenLabs, then spelling, romanization and
-                // English from Gemini. Network problems are thrown, so the entry stays
-                // "not uploaded" and the job retries later.
-                var processed: VocabEntry? = null
-                if (!entry.deleted && needsProcessing(entry)) {
+                // Step 1 on the server: Thai text from ElevenLabs. The result is saved
+                // locally at once, so the list shows the Thai text before step 2 starts.
+                // Network problems are thrown, so the entry stays "not uploaded" and the
+                // job retries later.
+                var transcribed: VocabEntry? = null
+                if (!entry.deleted && entry.transcription == Transcription.PENDING) {
                     try {
-                        processed = api.process(session.accessToken, entry.id).toEntry(audioDir)
+                        transcribed = api.process(session.accessToken, entry.id, "transcribe").toEntry(audioDir)
                     } catch (e: HttpException) {
-                        Log.w(TAG, "process failed for ${entry.id}", e)
+                        Log.w(TAG, "transcribe failed for ${entry.id}", e)
                         config.setError(e.message)
-                        if (entry.transcription == Transcription.PENDING) {
-                            store.update(entry.copy(transcription = Transcription.FAILED, transcriptionError = e.message))
-                            continue
-                        }
+                        store.update(entry.copy(transcription = Transcription.FAILED, transcriptionError = e.message))
+                        continue
                     }
                 }
                 store.markSynced(entry.id, entry.updatedAt, audioUploaded)
-                processed?.let { store.applyRemote(it) }
+                transcribed?.let { store.applyRemote(it) }
+
+                // Step 2 on the server: spelling check, romanization and English (Claude).
+                // A failure here leaves the row as it is; the catch-up in pull() retries it.
+                val current = transcribed ?: entry
+                if (!entry.deleted && current.thai != null && current.english == null) {
+                    try {
+                        store.applyRemote(api.process(session.accessToken, entry.id, "enrich").toEntry(audioDir))
+                    } catch (e: Exception) {
+                        Log.w(TAG, "enrich failed for ${entry.id}", e)
+                    }
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Sync failed for ${entry.id}", e)
                 config.setError(e.message)
@@ -119,10 +129,6 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         store.refresh()
         if (failed) Result.retry() else Result.success()
     }
-
-    /** New recordings without text, and Thai text without an English meaning yet. */
-    private fun needsProcessing(e: VocabEntry): Boolean =
-        e.transcription == Transcription.PENDING || (e.thai != null && e.english == null)
 
     private fun pull(api: SupabaseApi, token: String, userId: String, store: VocabStore) {
         val rows = api.select(
@@ -147,7 +153,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             .take(ENRICH_BATCH)
             .forEach { row ->
                 try {
-                    store.applyRemote(api.process(token, row.getString("id")).toEntry(audioDir))
+                    store.applyRemote(api.process(token, row.getString("id"), "enrich").toEntry(audioDir))
                 } catch (e: HttpException) {
                     Log.w(TAG, "process failed for ${row.getString("id")}", e)
                 }

@@ -457,6 +457,10 @@ private fun EntryRow(
             val meaning = listOfNotNull(entry.romanization, entry.english).joinToString(" · ")
             if (meaning.isNotEmpty()) {
                 Text(meaning, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+            } else if (entry.thai != null && System.currentTimeMillis() - entry.capturedAt < 3 * 60_000) {
+                // Step 2 (romanization and English) usually arrives a few seconds after the Thai text.
+                Text("Getting meaning…", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (entry.alternatives.isNotEmpty()) {
                 Text(

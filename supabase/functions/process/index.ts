@@ -1,27 +1,31 @@
 // Supabase Edge Function "process"
 //
-// Input:  POST {"item_id": "<uuid>"}   (with the user's login token)
+// Input:  POST {"item_id": "<uuid>", "step": "transcribe" | "enrich" | "all"}
+//         (with the user's login token; "step" defaults to "all")
 // Output: the updated vocab_items row (JSON object)
 //
-// Steps, for one vocabulary item that belongs to the caller:
-//   1. Transcription: if the item has an audio clip (the learner's own, or else a native
-//      speaker's recording made with the app's "Native speaker" switch) and no Thai text yet, send the clip to
-//      ElevenLabs speech-to-text (Thai) and save the text.
-//   2. Enrichment: if the item has Thai text and is not marked "reviewed", ask Gemini for
-//      the standard spelling, romanization, English meaning, word/phrase and part of speech.
-//      A corrected spelling replaces `thai`; the original transcript is kept in
+// The app calls the two steps separately, so the Thai text appears on the phone after
+// the first step, and romanization and English follow after the second.
+//
+//   "transcribe": if the item has an audio clip (the learner's own, or else a native
+//      speaker's recording made with the app's "Native speaker" switch) and no Thai text,
+//      send the clip to ElevenLabs speech-to-text (Thai) and save the text.
+//   "enrich": if the item has Thai text and is not marked "reviewed", ask Claude for the
+//      standard spelling, Paiboon+ romanization, English meaning, word/phrase and part of
+//      speech. A corrected spelling replaces `thai`; the original stays in
 //      `thai_alternatives`.
 // The function works with the caller's own permissions (Row Level Security).
 //
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
-//   ELEVENLABS_API_KEY     required for step 1
-//   GEMINI_API_KEY         required for step 2 (step 2 is skipped without it)
+//   ELEVENLABS_API_KEY     required for "transcribe"
+//   ANTHROPIC_API_KEY      required for "enrich" (skipped without it)
 // Optional:
 //   ELEVENLABS_STT_MODEL   default "scribe_v1"
-//   GEMINI_MODELS          comma-separated models to try in order, default
-//                          "gemini-3.8-flash,gemini-flash-latest,gemini-flash-lite-latest"
+//   CLAUDE_MODEL           default "claude-sonnet-5-5"
+//   CLAUDE_EFFORT          default "low" (short dictionary-style answer, fast)
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import Anthropic from "npm:@anthropic-ai/sdk";
 
 const PARTS_OF_SPEECH = [
   "noun", "verb", "adjective", "adverb", "preposition", "article",
@@ -62,6 +66,7 @@ async function transcribe(supabase: SupabaseClient, audioPath: string): Promise<
   return (JSON.parse(body).text ?? "").trim();
 }
 
+
 interface Enrichment {
   thai: string;
   romanization: string;
@@ -70,18 +75,9 @@ interface Enrichment {
   part_of_speech: string | null;
 }
 
-/**
- * Problem with one model (busy, rate limit, timeout, model retired): try the next model.
- * If all models fail this way, try again at the next sync and save no error.
- */
+/** Temporary problem (rate limit, server error, timeout, network): retry at the next sync. */
 class TemporaryError extends Error {}
-class BadRequestError extends Error {}
 
-const GEMINI_MODELS = (Deno.env.get("GEMINI_MODELS") ??
-  "gemini-3.8-flash,gemini-flash-latest,gemini-flash-lite-latest").split(",").map((m) => m.trim());
-
-/** Tries each model in turn while the error is temporary. */
-/** Paiboon+ romanization, written out in full so the model has no room for its own style. */
 const ROMANIZATION_RULES = `Paiboon+ romanization rules (follow exactly):
 Initial consonants:
   ก g | ข ฃ ค ฅ ฆ k | ง ng | จ j | ฉ ช ฌ ch | ซ ศ ษ ส s | ญ ย y | ฎ ด d | ฏ ต dt
@@ -105,34 +101,32 @@ Examples:
   ขอบคุณครับ kɔ̀ɔp-kun kráp | แม่น้ำ mɛ̂ɛ-náam | เธอ təə | มือถือ mʉʉ-tʉ̌ʉ | เด็ก dèk
   สวัสดี sà-wàt-dii | กินข้าว gin kâao | ไม่เป็นไร mâi bpen rai`;
 
-async function enrich(thai: string, notes: string | null): Promise<Enrichment> {
-  let last: unknown;
-  for (const model of GEMINI_MODELS) {
-    try {
-      try {
-        return await enrichWith(model, thai, notes, true);
-      } catch (e) {
-        // Some models reject the "thinking" setting: try once more without it.
-        if (e instanceof BadRequestError) return await enrichWith(model, thai, notes, false);
-        throw e;
-      }
-    } catch (e) {
-      last = e;
-      if (!(e instanceof TemporaryError)) throw e;
-    }
-  }
-  throw last;
-}
 
-async function enrichWith(
-  model: string, thai: string, notes: string | null, noThinking: boolean,
-): Promise<Enrichment> {
-  const apiKey = Deno.env.get("GEMINI_API_KEY")!;
+const ENRICHMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    thai: { type: "string" },
+    romanization: { type: "string" },
+    english: { type: "string" },
+    entry_type: { type: "string", enum: ["word", "phrase"] },
+    part_of_speech: { anyOf: [{ type: "string", enum: PARTS_OF_SPEECH }, { type: "null" }] },
+  },
+  required: ["thai", "romanization", "english", "entry_type", "part_of_speech"],
+  additionalProperties: false,
+};
+
+let anthropic: Anthropic | null = null;
+
+async function enrich(thai: string, notes: string | null): Promise<Enrichment> {
+  // Reads ANTHROPIC_API_KEY from the environment. One retry inside the SDK, then the
+  // next sync tries again; 30 s limit so the phone (60 s limit) always gets an answer.
+  anthropic ??= new Anthropic({ timeout: 30_000, maxRetries: 1 });
 
   const prompt = `You help an English speaker who learns Thai. They heard a Thai word or phrase
-in daily life and recorded it. Speech recognition produced this text, which can be
-misspelled: it often writes the sound instead of the dictionary spelling, for example it
-drops silent letters (ุ in เหตุ, ์ karan) or a quiet final consonant.
+and recorded it, often in their own (learner) pronunciation. Speech recognition produced this
+text, which can be misspelled: it often writes the sound instead of the dictionary spelling,
+for example it drops silent letters (ุ in เหตุ, ์ karan) or a quiet final consonant, or it
+writes a different word when a tone or vowel length was pronounced wrongly.
 
 Text: ${thai}
 ${notes ? `The learner's note: ${notes}\n` : ""}
@@ -146,53 +140,40 @@ Return:
 
 ${ROMANIZATION_RULES}`;
 
-  let res: Response;
+  let response;
   try {
-  res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-    {
-      method: "POST",
-      signal: AbortSignal.timeout(15_000),
-      headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.2,
-          // A short dictionary-style answer needs no "thinking"; this keeps it fast.
-          ...(noThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              thai: { type: "STRING" },
-              romanization: { type: "STRING" },
-              english: { type: "STRING" },
-              entry_type: { type: "STRING", enum: ["word", "phrase"] },
-              part_of_speech: { type: "STRING", enum: PARTS_OF_SPEECH, nullable: true },
-            },
-            required: ["thai", "romanization", "english", "entry_type"],
-          },
-        },
-      }),
-    },
-  );
+    response = await anthropic.beta.messages.create({
+      model: Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-5-5",
+      max_tokens: 4000,
+      // If a safety classifier declines, the API re-runs the request on a fallback model.
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: {
+        effort: (Deno.env.get("CLAUDE_EFFORT") ?? "low") as "low" | "medium" | "high" | "xhigh" | "max",
+        format: { type: "json_schema", schema: ENRICHMENT_SCHEMA },
+      },
+      messages: [{ role: "user", content: prompt }],
+    });
   } catch (e) {
-    throw new TemporaryError(`Gemini ${model}: ${e}`); // timeout or network
+    if (
+      e instanceof Anthropic.RateLimitError ||
+      e instanceof Anthropic.InternalServerError ||
+      e instanceof Anthropic.APIConnectionError // includes timeouts
+    ) {
+      throw new TemporaryError(`Claude: ${e.message}`);
+    }
+    throw e; // 400/401/403/404: permanent, saved as enrichment_error
   }
-  const body = await res.text();
-  if (res.status === 400 && noThinking) {
-    throw new BadRequestError(`Gemini ${model} 400: ${body.slice(0, 200)}`);
+
+  if (response.stop_reason === "refusal") throw new Error("Claude declined the request");
+  if (response.stop_reason === "max_tokens") throw new Error("Claude answer was cut off");
+  let text = "";
+  for (const block of response.content) {
+    if (block.type === "text") text += block.text;
   }
-  if (res.status === 429 || res.status === 404 || res.status >= 500) {
-    throw new TemporaryError(`Gemini ${model} ${res.status}: ${body.slice(0, 200)}`);
-  }
-  if (!res.ok) throw new Error(`Gemini ${model} ${res.status}: ${body.slice(0, 300)}`);
-  const text = JSON.parse(body).candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error(`Gemini returned no result: ${body.slice(0, 300)}`);
+  if (!text) throw new Error("Claude returned no text");
   const result = JSON.parse(text) as Enrichment;
-  if (result.entry_type === "phrase" || !PARTS_OF_SPEECH.includes(result.part_of_speech ?? "")) {
-    result.part_of_speech = null;
-  }
+  if (result.entry_type === "phrase") result.part_of_speech = null;
   return result;
 }
 
@@ -202,12 +183,16 @@ Deno.serve(async (req) => {
   if (!auth) return json({ error: "Not signed in" }, 401);
 
   let itemId: string;
+  let step: string;
   try {
-    itemId = (await req.json()).item_id;
+    const body = await req.json();
+    itemId = body.item_id;
+    step = body.step ?? "all";
   } catch {
     return json({ error: "Body must be JSON" }, 400);
   }
   if (!itemId) return json({ error: "item_id is missing" }, 400);
+  if (!["transcribe", "enrich", "all"].includes(step)) return json({ error: "Unknown step" }, 400);
 
   // Acts as the signed-in user, so the security rules apply.
   const supabase = createClient(
@@ -223,9 +208,9 @@ Deno.serve(async (req) => {
 
   const update: Row = {};
 
-  // 1. Transcription
+  // Step 1: transcription
   const clip: string | null = row.audio_path ?? row.native_audio_path;
-  if (!row.thai && clip && row.transcription_status !== "manual") {
+  if (step !== "enrich" && !row.thai && clip && row.transcription_status !== "manual") {
     try {
       const text = await transcribe(supabase, clip);
       if (text) {
@@ -238,9 +223,9 @@ Deno.serve(async (req) => {
     }
   }
 
-  // 2. Enrichment
+  // Step 2: enrichment
   const thai: string | null = update.thai ?? row.thai;
-  if (thai && row.enrichment_status !== "reviewed" && Deno.env.get("GEMINI_API_KEY")) {
+  if (step !== "transcribe" && thai && row.enrichment_status !== "reviewed" && Deno.env.get("ANTHROPIC_API_KEY")) {
     try {
       const r = await enrich(thai, row.notes);
       const corrected = r.thai.trim() || thai;
