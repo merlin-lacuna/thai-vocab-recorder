@@ -8,6 +8,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.thaivocab.recorder.data.CaptureContext
@@ -265,11 +266,28 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         fun schedule(context: Context, delaySeconds: Long = 0) {
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                // After a failed attempt: retry after 20 s, 40 s, 60 s, ... (linear, so a
+                // short network gap never leads to waits of an hour or more).
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 20, TimeUnit.SECONDS)
                 .setInitialDelay(delaySeconds, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context)
-                .enqueueUniqueWork("sync", ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+            val workManager = WorkManager.getInstance(context)
+            // Reading the current state blocks, so do it off the main thread.
+            Thread {
+                val infos = runCatching { workManager.getWorkInfosForUniqueWork(WORK_NAME).get() }
+                    .getOrDefault(emptyList())
+                // A running sync continues and the new one follows it. A sync that only waits
+                // (for a retry delay or for the network) is replaced, so the new request
+                // starts at once instead of waiting behind it.
+                val policy = if (infos.any { it.state == WorkInfo.State.RUNNING }) {
+                    ExistingWorkPolicy.APPEND_OR_REPLACE
+                } else {
+                    ExistingWorkPolicy.REPLACE
+                }
+                workManager.enqueueUniqueWork(WORK_NAME, policy, request)
+            }.apply { name = "sync-schedule"; start() }
         }
+
+        private const val WORK_NAME = "sync"
     }
 }
