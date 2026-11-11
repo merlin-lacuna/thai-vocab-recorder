@@ -104,6 +104,11 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         )
     }
 
+    /** Deletes the rows that match [query], e.g. "key=eq.market". */
+    fun delete(token: String, table: String, query: String) {
+        requestBytes("DELETE", "/rest/v1/$table?$query", token, null, null, mapOf("Prefer" to "return=minimal"))
+    }
+
     /** Upserts several rows; [onConflict] names the primary-key columns, e.g. "user_id,key". */
     fun upsertMany(token: String, table: String, rows: JSONArray, onConflict: String) {
         request(

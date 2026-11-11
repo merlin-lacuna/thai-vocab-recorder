@@ -80,8 +80,10 @@ The app stores only a login token; the password is not saved.
 * **Context:** the labels above the record button select where the word comes from.
   Built-in: *Field work* (default), *Just wondering* (looked up out of curiosity),
   *Lingping* (club), and lessons with *Kru Boom* or *Kru Ae*. **✎ Labels** opens a window to
-  add, rename or remove your own labels (table `capture_contexts`, synced between phones;
-  a removed label stays on the words that use it). The choice is saved with each entry and
+  add your own labels (table `capture_contexts`, synced between phones). **Tap a selected
+  label of your own again**, or tap it in the Labels window, to rename or delete it. Delete
+  removes the label completely when no word uses it; otherwise it is only hidden, and those
+  words keep it. The choice is saved with each entry and
   can be changed later in the edit window. It returns to *Field work* after 4 hours
   without a recording.
 * **Thai text and meaning (two steps):** after upload, the app calls the Supabase Edge
@@ -104,6 +106,9 @@ The app stores only a login token; the password is not saved.
   `native_audio_source` = `human:Kru Boom`, `human:Kru Ae` or `human:native speaker`), and
   the play buttons play native clips where they exist. A blue speaker icon marks words
   that have a native clip. The switch turns off after 4 hours without a recording.
+* **Edit a word** (tap it): Thai text, notes, context, **Remove my recording**,
+  **Remove native clip**, **Delete** (the whole word). The audio file stays in storage;
+  only the link from the word is removed.
 * **Waveform and playback:** bars show the microphone level while you record. During
   playback, a ring around the play button shows the progress; tap again to stop.
 * **Offline first:** each entry is first saved in a local SQLite database on the phone.

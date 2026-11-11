@@ -92,8 +92,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         afterContextChange()
     }
 
-    fun hideContext(key: String) {
-        catalog.hide(key)
+    /** Deletes a label (or hides it on the server when words still use it). */
+    fun removeContext(key: String) {
+        catalog.remove(key)
         afterContextChange()
     }
 
@@ -226,6 +227,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // New Thai text: the server adds a new meaning and romanization.
                 english = if (newThai != entry.thai) null else entry.english,
                 romanization = if (newThai != entry.thai) null else entry.romanization,
+            )
+        )
+        SyncWorker.schedule(getApplication())
+    }
+
+    /** Removes the learner's own recording from the word; the word itself stays. */
+    fun removeOwnRecording(entry: VocabEntry) {
+        if (_playingId.value == entry.id) stopPlayback()
+        entry.audioFile?.let { File(it).delete() }
+        store.update(entry.copy(audioFile = null, audioUploaded = false))
+        SyncWorker.schedule(getApplication())
+    }
+
+    /** Removes the native pronunciation clip from the word; the word itself stays. */
+    fun removeNativeClip(entry: VocabEntry) {
+        if (_playingId.value == entry.id) stopPlayback()
+        entry.nativeAudioFile?.let { File(it).delete() }
+        store.update(
+            entry.copy(
+                nativeAudioFile = null, nativeAudioPath = null, nativeAudioSource = null,
+                nativeAudioUploaded = true, nativeCleared = true,
             )
         )
         SyncWorker.schedule(getApplication())

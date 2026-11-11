@@ -43,6 +43,8 @@ data class VocabEntry(
     val nativeAudioPath: String? = null,
     val nativeAudioSource: String? = null,
     val nativeAudioUploaded: Boolean = true,
+    /** The user removed the native clip on the phone: the next upload empties it on the server. */
+    val nativeCleared: Boolean = false,
     val transcription: Transcription,
     /** True when the local version has changes that are not in the cloud yet. */
     val dirty: Boolean,
@@ -52,7 +54,7 @@ data class VocabEntry(
 
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 5) {
+    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 6) {
 
     private val catalog = ContextCatalog.get(context)
 
@@ -88,7 +90,8 @@ class VocabStore private constructor(context: Context) :
                 native_audio_file TEXT,
                 native_audio_path TEXT,
                 native_audio_source TEXT,
-                native_audio_uploaded INTEGER NOT NULL DEFAULT 1
+                native_audio_uploaded INTEGER NOT NULL DEFAULT 1,
+                native_cleared INTEGER NOT NULL DEFAULT 0
             )
             """.trimIndent()
         )
@@ -108,6 +111,7 @@ class VocabStore private constructor(context: Context) :
             db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_source TEXT")
             db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_uploaded INTEGER NOT NULL DEFAULT 1")
         }
+        if (oldVersion < 6) db.execSQL("ALTER TABLE entries ADD COLUMN native_cleared INTEGER NOT NULL DEFAULT 0")
     }
 
     @Synchronized
@@ -257,6 +261,7 @@ class VocabStore private constructor(context: Context) :
         put("native_audio_path", nativeAudioPath)
         put("native_audio_source", nativeAudioSource)
         put("native_audio_uploaded", if (nativeAudioUploaded) 1 else 0)
+        put("native_cleared", if (nativeCleared) 1 else 0)
     }
 
     private fun Cursor.toEntry(): VocabEntry {
@@ -284,6 +289,7 @@ class VocabStore private constructor(context: Context) :
             nativeAudioPath = str("native_audio_path"),
             nativeAudioSource = str("native_audio_source"),
             nativeAudioUploaded = long("native_audio_uploaded") == 1L,
+            nativeCleared = long("native_cleared") == 1L,
         )
     }
 

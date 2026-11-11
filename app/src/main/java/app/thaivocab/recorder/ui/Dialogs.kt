@@ -1,6 +1,8 @@
 package app.thaivocab.recorder.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -55,8 +57,11 @@ fun EditDialog(
     onPlay: () -> Unit,
     onRetry: () -> Unit = {},
     contextOptions: List<CaptureContext> = CaptureContext.BUILT_IN,
+    onRemoveOwnRecording: () -> Unit = {},
+    onRemoveNativeClip: () -> Unit = {},
 ) {
     var thai by remember { mutableStateOf(entry.thai.orEmpty()) }
+    var confirmRemove by remember { mutableStateOf<String?>(null) }
     var notes by remember { mutableStateOf(entry.notes.orEmpty()) }
     var context by remember { mutableStateOf(entry.context) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -96,6 +101,23 @@ fun EditDialog(
                     label = { Text("Notes (meaning, where you heard it…)") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Clips can be removed one by one; the word stays.
+                if (entry.audioFile != null) {
+                    TextButton(onClick = {
+                        if (confirmRemove == "own") onRemoveOwnRecording() else confirmRemove = "own"
+                    }) {
+                        Text(if (confirmRemove == "own") "Really remove my recording?" else "Remove my recording",
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                }
+                if (entry.nativeAudioFile != null) {
+                    TextButton(onClick = {
+                        if (confirmRemove == "native") onRemoveNativeClip() else confirmRemove = "native"
+                    }) {
+                        Text(if (confirmRemove == "native") "Really remove native clip?" else "Remove native clip",
+                            color = MaterialTheme.colorScheme.error)
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 Text("Context:", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -242,8 +264,7 @@ fun LabelsDialog(
     onDismiss: () -> Unit,
 ) {
     var newLabel by remember { mutableStateOf("") }
-    var renaming by remember { mutableStateOf<CustomContext?>(null) }
-    var renameText by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf<CustomContext?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -261,27 +282,15 @@ fun LabelsDialog(
                     Text("No own labels yet.", style = MaterialTheme.typography.bodyMedium)
                 }
                 labels.forEach { c ->
-                    if (renaming?.key == c.key) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            OutlinedTextField(
-                                renameText, { renameText = it }, singleLine = true,
-                                modifier = Modifier.weight(1f),
-                            )
-                            TextButton(
-                                enabled = renameText.isNotBlank(),
-                                onClick = { onRename(c.key, renameText); renaming = null },
-                            ) { Text("OK") }
-                        }
-                    } else {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(c.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            IconButton(onClick = { renaming = c; renameText = c.label }) {
-                                Icon(Icons.Filled.Edit, contentDescription = "Rename")
-                            }
-                            IconButton(onClick = { onRemove(c.key) }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Remove")
-                            }
-                        }
+                    // Tap a label to rename or delete it.
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { selected = c },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(c.label, Modifier.weight(1f).padding(vertical = 12.dp), style = MaterialTheme.typography.bodyLarge)
+                        Icon(Icons.Filled.Edit, contentDescription = "Rename or delete")
                     }
                 }
                 Spacer(Modifier.height(8.dp))
@@ -298,12 +307,60 @@ fun LabelsDialog(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "A removed label disappears from the selection. Words that use it keep it.",
+                    "Delete: the label is deleted, or only hidden if words use it (they keep it).",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
+
+    selected?.let { c ->
+        LabelActionDialog(
+            label = c.label,
+            onRename = { onRename(c.key, it); selected = null },
+            onDelete = { onRemove(c.key); selected = null },
+            onDismiss = { selected = null },
+        )
+    }
+}
+
+/** Rename or delete one of the user's own labels. */
+@Composable
+fun LabelActionDialog(
+    label: String,
+    onRename: (String) -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf(label) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Label") },
+        text = {
+            Column {
+                OutlinedTextField(text, { text = it }, singleLine = true, label = { Text("Name") },
+                    modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Delete: the label is deleted, or only hidden if words use it (they keep it).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = text.isNotBlank() && text.trim() != label, onClick = { onRename(text) }) { Text("Rename") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { if (confirmDelete) onDelete() else confirmDelete = true }) {
+                    Text(if (confirmDelete) "Really delete?" else "Delete", color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
     )
 }

@@ -117,6 +117,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val contextOptions by vm.contextOptions.collectAsStateWithLifecycle()
     val customContexts by vm.customContexts.collectAsStateWithLifecycle()
     var showLabels by remember { mutableStateOf(false) }
+    var labelMenu by remember { mutableStateOf<CaptureContext?>(null) }
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
@@ -144,6 +145,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         onContextChange = vm::setContext,
         contextOptions = contextOptions,
         onEditLabels = { showLabels = true },
+        onLabelMenu = { labelMenu = it },
         levels = levels,
         playingId = playingId,
         playProgress = { playProgress.value },
@@ -174,17 +176,27 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
             onPlay = { vm.play(entry) },
             onRetry = { vm.retryTranscription(entry); editing = null },
             contextOptions = contextOptions,
+            onRemoveOwnRecording = { vm.removeOwnRecording(entry); editing = null },
+            onRemoveNativeClip = { vm.removeNativeClip(entry); editing = null },
         )
     }
     if (typing) {
         TypeDialog(onDismiss = { typing = false }, onSave = { thai, notes -> vm.addTyped(thai, notes); typing = false })
+    }
+    labelMenu?.let { c ->
+        LabelActionDialog(
+            label = c.label,
+            onRename = { vm.renameContext(c.key, it); labelMenu = null },
+            onDelete = { vm.removeContext(c.key); labelMenu = null },
+            onDismiss = { labelMenu = null },
+        )
     }
     if (showLabels) {
         LabelsDialog(
             labels = customContexts.filter { !it.hidden },
             onAdd = vm::addContext,
             onRename = vm::renameContext,
-            onRemove = vm::hideContext,
+            onRemove = vm::removeContext,
             onDismiss = { showLabels = false },
         )
     }
@@ -208,6 +220,7 @@ fun MainContent(
     onContextChange: (CaptureContext) -> Unit = {},
     contextOptions: List<CaptureContext> = CaptureContext.BUILT_IN,
     onEditLabels: () -> Unit = {},
+    onLabelMenu: (CaptureContext) -> Unit = {},
     levels: List<Float> = emptyList(),
     playingId: String? = null,
     playProgress: () -> Float = { 0f },
@@ -295,6 +308,7 @@ fun MainContent(
                 selected = captureContext,
                 onSelect = onContextChange,
                 onEditLabels = onEditLabels,
+                onLabelMenu = onLabelMenu,
             )
 
             // Waveform while recording; otherwise space for short messages.
@@ -401,6 +415,7 @@ private fun ContextBar(
     selected: CaptureContext,
     onSelect: (CaptureContext) -> Unit,
     onEditLabels: () -> Unit,
+    onLabelMenu: (CaptureContext) -> Unit,
 ) {
     // Wraps onto a second line when the screen is too narrow, so every label is visible.
     FlowRow(
@@ -412,7 +427,8 @@ private fun ContextBar(
         options.forEach { c ->
             FilterChip(
                 selected = c.id == selected.id,
-                onClick = { onSelect(c) },
+                // Tapping your own label when it is already selected opens Rename / Delete.
+                onClick = { if (c.id == selected.id && !c.builtIn) onLabelMenu(c) else onSelect(c) },
                 label = { Text(c.label) },
                 leadingIcon = if (c.isLesson) {
                     { Icon(Icons.Filled.School, contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) }

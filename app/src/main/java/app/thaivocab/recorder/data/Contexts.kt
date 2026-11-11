@@ -41,13 +41,18 @@ data class CaptureContext(
     }
 }
 
-/** A label that the user added. [dirty]: changed on the phone, not uploaded yet. */
+/**
+ * A label that the user added. [dirty]: changed on the phone, not uploaded yet.
+ * [removed]: the user deleted it; the sync job deletes the row on the server, or hides it
+ * when words still use it.
+ */
 data class CustomContext(
     val key: String,
     val label: String,
     val sortOrder: Int,
     val hidden: Boolean,
     val dirty: Boolean,
+    val removed: Boolean = false,
 )
 
 /**
@@ -113,10 +118,19 @@ class ContextCatalog private constructor(context: Context) {
     fun rename(key: String, label: String) =
         save(_customs.value.map { if (it.key == key) it.copy(label = label.trim().take(40), dirty = true) else it })
 
-    /** Removes the label from the selection. Words that use it keep it. */
+    /** Deletes the label: it leaves the selection at once; the sync job finishes the job. */
     @Synchronized
-    fun hide(key: String) =
-        save(_customs.value.map { if (it.key == key) it.copy(hidden = true, dirty = true) else it })
+    fun remove(key: String) =
+        save(_customs.value.map { if (it.key == key) it.copy(hidden = true, removed = true, dirty = true) else it })
+
+    /** After the server row was deleted (no word used the label). */
+    @Synchronized
+    fun drop(key: String) = save(_customs.value.filter { it.key != key })
+
+    /** After the server row was hidden instead (words still use the label). */
+    @Synchronized
+    fun keepHidden(key: String) =
+        save(_customs.value.map { if (it.key == key) it.copy(removed = false, dirty = false, hidden = true) else it })
 
     fun dirty(): List<CustomContext> = _customs.value.filter { it.dirty }
 
@@ -137,7 +151,7 @@ class ContextCatalog private constructor(context: Context) {
     private fun save(list: List<CustomContext>) {
         val json = JSONArray(list.map {
             JSONObject().put("key", it.key).put("label", it.label).put("sort", it.sortOrder)
-                .put("hidden", it.hidden).put("dirty", it.dirty)
+                .put("hidden", it.hidden).put("dirty", it.dirty).put("removed", it.removed)
         })
         prefs.edit().putString("custom", json.toString()).apply()
         _customs.value = list
@@ -149,7 +163,7 @@ class ContextCatalog private constructor(context: Context) {
         List(arr.length()) { i ->
             val o = arr.getJSONObject(i)
             CustomContext(o.getString("key"), o.getString("label"), o.optInt("sort", 100),
-                o.optBoolean("hidden"), o.optBoolean("dirty"))
+                o.optBoolean("hidden"), o.optBoolean("dirty"), o.optBoolean("removed"))
         }
     }.getOrDefault(emptyList())
 

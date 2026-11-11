@@ -144,6 +144,19 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
 
     private fun syncContexts(api: SupabaseApi, token: String) {
         val catalog = ContextCatalog.get(applicationContext)
+        // Deleted labels: delete the row when no word uses the label, else hide it.
+        for (c in catalog.dirty().filter { it.removed }) {
+            val used = api.select(token, TABLE, "select=id&context=eq.${c.key}&limit=1").length() > 0
+            if (used) {
+                api.upsertMany(token, CONTEXTS_TABLE,
+                    JSONArray().put(JSONObject().put("key", c.key).put("label", c.label)
+                        .put("sort_order", c.sortOrder).put("hidden", true)), "user_id,key")
+                catalog.keepHidden(c.key)
+            } else {
+                api.delete(token, CONTEXTS_TABLE, "key=eq.${c.key}")
+                catalog.drop(c.key)
+            }
+        }
         val changed = catalog.dirty()
         if (changed.isNotEmpty()) {
             val rows = JSONArray(changed.map {
@@ -264,8 +277,14 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         put("source", source)
         // Native clip fields only when known, so a stale phone never erases a clip that a
         // batch job added in the meantime.
-        nativeAudioPath?.let { put("native_audio_path", it) }
-        nativeAudioSource?.let { put("native_audio_source", it) }
+        if (nativeCleared) {
+            // The user removed the native clip on the phone.
+            put("native_audio_path", JSONObject.NULL)
+            put("native_audio_source", JSONObject.NULL)
+        } else {
+            nativeAudioPath?.let { put("native_audio_path", it) }
+            nativeAudioSource?.let { put("native_audio_source", it) }
+        }
         put("context", context.dbValue)
         put("teacher", context.teacher ?: JSONObject.NULL)
         put("transcription_error", transcriptionError ?: JSONObject.NULL)
