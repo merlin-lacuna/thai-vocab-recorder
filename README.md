@@ -77,10 +77,13 @@ The app stores only a login token; the password is not saved.
 
 * **Capture:** the microphone records 16 kHz mono WAV while you hold the button
   (maximum 60 seconds). Clips shorter than 0.4 seconds are ignored.
-* **Context:** the buttons at the top select where the word comes from: *Field work*
-  (default), *Just wondering* (looked up out of curiosity), *Lingping* (club), or a
-  lesson with *Kru Boom* or *Kru Ae*. The choice is saved with
-  each entry. It returns to *Field work* after 4 hours without a recording.
+* **Context:** the labels above the record button select where the word comes from.
+  Built-in: *Field work* (default), *Just wondering* (looked up out of curiosity),
+  *Lingping* (club), and lessons with *Kru Boom* or *Kru Ae*. **✎ Labels** opens a window to
+  add, rename or remove your own labels (table `capture_contexts`, synced between phones;
+  a removed label stays on the words that use it). The choice is saved with each entry and
+  can be changed later in the edit window. It returns to *Field work* after 4 hours
+  without a recording.
 * **Thai text and meaning (two steps):** after upload, the app calls the Supabase Edge
   Function `process` (`supabase/functions/process/`) twice:
   1. `step: "transcribe"` sends the clip to ElevenLabs speech-to-text (Thai). The list shows

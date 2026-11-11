@@ -104,6 +104,15 @@ class SupabaseApi(private val baseUrl: String, private val apiKey: String) {
         )
     }
 
+    /** Upserts several rows; [onConflict] names the primary-key columns, e.g. "user_id,key". */
+    fun upsertMany(token: String, table: String, rows: JSONArray, onConflict: String) {
+        request(
+            "POST", "/rest/v1/$table?on_conflict=$onConflict", token, "application/json",
+            rows.toString().toByteArray(),
+            mapOf("Prefer" to "resolution=merge-duplicates,return=minimal"),
+        )
+    }
+
     fun upsert(token: String, table: String, row: JSONObject) {
         request(
             "POST", "/rest/v1/$table?on_conflict=id", token, "application/json",

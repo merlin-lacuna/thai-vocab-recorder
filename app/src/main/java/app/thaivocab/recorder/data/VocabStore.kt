@@ -11,20 +11,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
 import java.io.File
 
-/**
- * Where the word came from. FIELD (cafe, taxi, daily life) is the default.
- * WONDERING: looked up out of curiosity, without a real-life situation.
- * Lessons store the teacher's name.
- */
-enum class CaptureContext(val dbValue: String, val label: String, val teacher: String?) {
-    FIELD("field", "Field work", null),
-    WONDERING("wondering", "Just wondering", null),
-    LINGPING("lingping_club", "Lingping", null),
-    KRU_BOOM("lesson", "Kru Boom", "Boom"),
-    KRU_AE("lesson", "Kru Ae", "Ae");
-
-    val isLesson: Boolean get() = teacher != null
-}
 
 /** How far the Thai speech-to-text step has come for one entry. */
 enum class Transcription { PENDING, DONE, FAILED, MANUAL }
@@ -67,6 +53,8 @@ data class VocabEntry(
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
     SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 5) {
+
+    private val catalog = ContextCatalog.get(context)
 
     private val _entries = MutableStateFlow<List<VocabEntry>>(emptyList())
 
@@ -260,7 +248,7 @@ class VocabStore private constructor(context: Context) :
         put("dirty", if (dirty) 1 else 0)
         put("audio_uploaded", if (audioUploaded) 1 else 0)
         put("deleted", if (deleted) 1 else 0)
-        put("context", context.name)
+        put("context", context.id)
         put("transcription_error", transcriptionError)
         put("english", english)
         put("romanization", romanization)
@@ -287,7 +275,7 @@ class VocabStore private constructor(context: Context) :
             dirty = long("dirty") == 1L,
             audioUploaded = long("audio_uploaded") == 1L,
             deleted = long("deleted") == 1L,
-            context = runCatching { CaptureContext.valueOf(str("context")!!) }.getOrDefault(CaptureContext.FIELD),
+            context = catalog.resolveId(str("context")),
             transcriptionError = str("transcription_error"),
             english = str("english"),
             romanization = str("romanization"),

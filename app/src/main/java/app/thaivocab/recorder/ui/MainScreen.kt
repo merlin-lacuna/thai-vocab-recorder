@@ -86,6 +86,8 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.compose.foundation.Canvas
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.AssistChip
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.SystemUpdate
@@ -112,6 +114,9 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     val update by vm.update.collectAsStateWithLifecycle()
     val updateProgress by vm.updateProgress.collectAsStateWithLifecycle()
     val nativeMode by vm.nativeMode.collectAsStateWithLifecycle()
+    val contextOptions by vm.contextOptions.collectAsStateWithLifecycle()
+    val customContexts by vm.customContexts.collectAsStateWithLifecycle()
+    var showLabels by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
@@ -137,6 +142,8 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         syncError = supabase.lastError,
         captureContext = captureContext,
         onContextChange = vm::setContext,
+        contextOptions = contextOptions,
+        onEditLabels = { showLabels = true },
         levels = levels,
         playingId = playingId,
         playProgress = { playProgress.value },
@@ -166,10 +173,20 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
             onDelete = { vm.delete(entry); editing = null },
             onPlay = { vm.play(entry) },
             onRetry = { vm.retryTranscription(entry); editing = null },
+            contextOptions = contextOptions,
         )
     }
     if (typing) {
         TypeDialog(onDismiss = { typing = false }, onSave = { thai, notes -> vm.addTyped(thai, notes); typing = false })
+    }
+    if (showLabels) {
+        LabelsDialog(
+            labels = customContexts.filter { !it.hidden },
+            onAdd = vm::addContext,
+            onRename = vm::renameContext,
+            onRemove = vm::hideContext,
+            onDismiss = { showLabels = false },
+        )
     }
     if (showSetup) {
         SetupDialog(vm = vm, state = supabase, onDismiss = { showSetup = false })
@@ -189,6 +206,8 @@ fun MainContent(
     syncError: String?,
     captureContext: CaptureContext = CaptureContext.FIELD,
     onContextChange: (CaptureContext) -> Unit = {},
+    contextOptions: List<CaptureContext> = CaptureContext.BUILT_IN,
+    onEditLabels: () -> Unit = {},
     levels: List<Float> = emptyList(),
     playingId: String? = null,
     playProgress: () -> Float = { 0f },
@@ -271,7 +290,12 @@ fun MainContent(
 
             HorizontalDivider()
             // Context labels near the record button, in reach of the thumb.
-            ContextBar(selected = captureContext, onSelect = onContextChange)
+            ContextBar(
+                options = contextOptions,
+                selected = captureContext,
+                onSelect = onContextChange,
+                onEditLabels = onEditLabels,
+            )
 
             // Waveform while recording; otherwise space for short messages.
             Box(
@@ -372,7 +396,12 @@ private fun UpdateBanner(build: Long, progress: Float?, onClick: () -> Unit) {
 /** Field work (default), Lingping club, or a lesson with a teacher. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ContextBar(selected: CaptureContext, onSelect: (CaptureContext) -> Unit) {
+private fun ContextBar(
+    options: List<CaptureContext>,
+    selected: CaptureContext,
+    onSelect: (CaptureContext) -> Unit,
+    onEditLabels: () -> Unit,
+) {
     // Wraps onto a second line when the screen is too narrow, so every label is visible.
     FlowRow(
         Modifier
@@ -380,9 +409,9 @@ private fun ContextBar(selected: CaptureContext, onSelect: (CaptureContext) -> U
             .padding(start = 12.dp, end = 12.dp, top = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
     ) {
-        CaptureContext.entries.forEach { c ->
+        options.forEach { c ->
             FilterChip(
-                selected = c == selected,
+                selected = c.id == selected.id,
                 onClick = { onSelect(c) },
                 label = { Text(c.label) },
                 leadingIcon = if (c.isLesson) {
@@ -390,6 +419,11 @@ private fun ContextBar(selected: CaptureContext, onSelect: (CaptureContext) -> U
                 } else null,
             )
         }
+        AssistChip(
+            onClick = onEditLabels,
+            label = { Text("Labels") },
+            leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) },
+        )
     }
 }
 
@@ -475,7 +509,7 @@ private fun EntryRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     timeFormat.format(Date(entry.capturedAt)) +
-                        if (entry.context != CaptureContext.FIELD) " · ${entry.context.label}" else "",
+                        if (entry.context.id != CaptureContext.FIELD.id) " · ${entry.context.label}" else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

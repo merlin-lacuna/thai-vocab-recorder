@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * [RESET_AFTER_MS] without use, so a forgotten lesson flag does not label later words.
  */
 class ContextSetting(context: Context) {
+    private val catalog = ContextCatalog.get(context)
     private val prefs = context.applicationContext.getSharedPreferences("capture_context", Context.MODE_PRIVATE)
     private val _current = MutableStateFlow(load())
     val current: StateFlow<CaptureContext> = _current.asStateFlow()
@@ -34,8 +35,9 @@ class ContextSetting(context: Context) {
     private fun load(): CaptureContext {
         val lastUsed = prefs.getLong("last_used", 0)
         if (System.currentTimeMillis() - lastUsed > RESET_AFTER_MS) return CaptureContext.FIELD
-        return runCatching { CaptureContext.valueOf(prefs.getString("value", null)!!) }
-            .getOrDefault(CaptureContext.FIELD)
+        val saved = catalog.resolveId(prefs.getString("value", null))
+        // A label that was removed (hidden) is no longer selected.
+        return if (catalog.selectable.value.any { it.id == saved.id }) saved else CaptureContext.FIELD
     }
 
     fun set(value: CaptureContext) {
@@ -46,7 +48,7 @@ class ContextSetting(context: Context) {
     /** Call when the context is used (selected, or a word is recorded). */
     fun touch() {
         prefs.edit()
-            .putString("value", _current.value.name)
+            .putString("value", _current.value.id)
             .putBoolean("native", _native.value)
             .putLong("last_used", System.currentTimeMillis())
             .apply()

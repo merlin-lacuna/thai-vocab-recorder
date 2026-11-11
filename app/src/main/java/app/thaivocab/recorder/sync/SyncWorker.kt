@@ -12,6 +12,8 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.thaivocab.recorder.data.CaptureContext
+import app.thaivocab.recorder.data.ContextCatalog
+import app.thaivocab.recorder.data.CustomContext
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.data.VocabStore
@@ -116,6 +118,15 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 failed = true
             }
         }
+        // The user's own context labels: upload changes, then download the list.
+        try {
+            syncContexts(api, session.accessToken)
+        } catch (e: Exception) {
+            Log.w(TAG, "Label sync failed", e)
+            config.setError(e.message)
+            failed = true
+        }
+
         // Then download the newest rows, so the phone also shows words from other sources,
         // changes made in the dashboard, and the history after a reinstall.
         try {
@@ -129,6 +140,25 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         if (!failed) config.setError(null)
         store.refresh()
         if (failed) Result.retry() else Result.success()
+    }
+
+    private fun syncContexts(api: SupabaseApi, token: String) {
+        val catalog = ContextCatalog.get(applicationContext)
+        val changed = catalog.dirty()
+        if (changed.isNotEmpty()) {
+            val rows = JSONArray(changed.map {
+                JSONObject().put("key", it.key).put("label", it.label)
+                    .put("sort_order", it.sortOrder).put("hidden", it.hidden)
+            })
+            api.upsertMany(token, CONTEXTS_TABLE, rows, "user_id,key")
+            catalog.markUploaded(changed)
+        }
+        val list = api.select(token, CONTEXTS_TABLE, "select=key,label,sort_order,hidden")
+        catalog.replaceFromServer(List(list.length()) { i ->
+            val o = list.getJSONObject(i)
+            CustomContext(o.getString("key"), o.getString("label"), o.optInt("sort_order", 100),
+                o.optBoolean("hidden"), dirty = false)
+        })
     }
 
     private fun pull(api: SupabaseApi, token: String, userId: String, store: VocabStore) {
@@ -192,15 +222,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         fun time(key: String): Long? = str(key)?.let { OffsetDateTime.parse(it).toInstant().toEpochMilli() }
         val id = getString("id")
         val alts = optJSONArray("thai_alternatives") ?: JSONArray()
-        val context = when (str("context")) {
-            "lingping_club" -> CaptureContext.LINGPING
-            "wondering" -> CaptureContext.WONDERING
-            "lesson" -> when (str("teacher")?.lowercase()) {
-                "ae" -> CaptureContext.KRU_AE
-                else -> CaptureContext.KRU_BOOM
-            }
-            else -> CaptureContext.FIELD
-        }
+        val context = ContextCatalog.get(applicationContext).fromDb(str("context"), str("teacher"))
         val thai = str("thai")
         return VocabEntry(
             id = id,
@@ -258,6 +280,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         const val TABLE = "vocab_items"
         const val AUDIO_BUCKET = "vocab-audio"
         const val SOURCE = "field_recorder"
+        private const val CONTEXTS_TABLE = "capture_contexts"
         private const val PULL_LIMIT = 500
         private const val AUDIO_DOWNLOAD_LIMIT = 100
         private const val ENRICH_BATCH = 20

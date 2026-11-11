@@ -81,7 +81,7 @@ Network hosts needed: `*.supabase.co` and `api.supabase.com`.
 | `id` | uuid, PK | Deterministic UUID, see 4.1 |
 | `user_id` | uuid | Set automatically with access A; with access B use `c8e00ce7-52e5-47ff-aee2-9bffc418e428` |
 | `captured_at` | timestamptz | A date from the source if it has one (for example a lesson date or a date column). Otherwise one fixed timestamp for the whole batch; do not spend effort on it. See the note below the table. |
-| `context` | text | `field` (daily life), `wondering` (looked up out of curiosity), `lingping_club` (weekly practice group), `lesson`, `other` |
+| `context` | text | Built-in: `field` (daily life), `wondering` (looked up out of curiosity), `lingping_club` (weekly practice group), `lesson` (with `teacher`), `other`. Or the `key` of one of the user's own labels in table `capture_contexts` (`select key, label from capture_contexts`). Format: `a-z`, `0-9`, `_`, at most 40 characters. To add a label for the import, insert a row into `capture_contexts` (`key`, `label`). |
 | `teacher` | text | Only for `context = 'lesson'`: `Boom` or `Ae` (exact spelling, the app maps these) |
 | `source` | text | Name of the input, for example `lesson_recorder`, `pickup_thai`, `import_<name>`. Never `field_recorder` (that is the phone app). |
 | `thai` | text | Thai script. Null if only audio exists (the AI step transcribes it). |

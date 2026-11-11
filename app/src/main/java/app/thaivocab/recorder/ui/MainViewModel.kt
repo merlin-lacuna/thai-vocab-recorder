@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import app.thaivocab.recorder.audio.WavRecorder
 import app.thaivocab.recorder.data.CaptureContext
 import app.thaivocab.recorder.data.ContextSetting
+import app.thaivocab.recorder.data.ContextCatalog
+import app.thaivocab.recorder.data.CustomContext
 import app.thaivocab.recorder.data.Transcription
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.data.VocabStore
@@ -72,6 +74,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setContext(value: CaptureContext) = contextSetting.set(value)
+
+    // Context labels: built-in plus the user's own (synced with the table capture_contexts).
+    private val catalog = ContextCatalog.get(app)
+    val contextOptions: StateFlow<List<CaptureContext>> = catalog.selectable
+    val customContexts: StateFlow<List<CustomContext>> = catalog.customs
+
+    fun addContext(label: String) {
+        if (label.isBlank()) return
+        catalog.add(label)
+        SyncWorker.schedule(getApplication())
+    }
+
+    fun renameContext(key: String, label: String) {
+        if (label.isBlank()) return
+        catalog.rename(key, label)
+        afterContextChange()
+    }
+
+    fun hideContext(key: String) {
+        catalog.hide(key)
+        afterContextChange()
+    }
+
+    /** Shows new label names in the list and in the selection; uploads the change. */
+    private fun afterContextChange() {
+        store.refresh()
+        contextSetting.recheck()
+        SyncWorker.schedule(getApplication())
+    }
 
     val nativeMode: StateFlow<Boolean> = contextSetting.native
     fun setNativeMode(value: Boolean) = contextSetting.setNative(value)

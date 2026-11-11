@@ -1,6 +1,10 @@
 package app.thaivocab.recorder.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import app.thaivocab.recorder.data.CustomContext
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -50,6 +54,7 @@ fun EditDialog(
     onDelete: () -> Unit,
     onPlay: () -> Unit,
     onRetry: () -> Unit = {},
+    contextOptions: List<CaptureContext> = CaptureContext.BUILT_IN,
 ) {
     var thai by remember { mutableStateOf(entry.thai.orEmpty()) }
     var notes by remember { mutableStateOf(entry.notes.orEmpty()) }
@@ -94,8 +99,11 @@ fun EditDialog(
                 Spacer(Modifier.height(8.dp))
                 Text("Context:", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    CaptureContext.entries.forEach { c ->
-                        FilterChip(selected = c == context, onClick = { context = c }, label = { Text(c.label) })
+                    // The word's current context stays selectable, even if its label was removed.
+                    val options = if (contextOptions.any { it.id == entry.context.id }) contextOptions
+                        else contextOptions + entry.context
+                    options.forEach { c ->
+                        FilterChip(selected = c.id == context.id, onClick = { context = c }, label = { Text(c.label) })
                     }
                 }
             }
@@ -221,5 +229,81 @@ fun SetupDialog(vm: MainViewModel, state: SupabaseConfig.State, onDismiss: () ->
                 TextButton(onClick = onDismiss) { Text("Later") }
             }
         },
+    )
+}
+
+/** Add, rename and remove the user's own context labels. Built-in labels are fixed. */
+@Composable
+fun LabelsDialog(
+    labels: List<CustomContext>,
+    onAdd: (String) -> Unit,
+    onRename: (key: String, label: String) -> Unit,
+    onRemove: (key: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newLabel by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<CustomContext?>(null) }
+    var renameText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text("Context labels") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Built-in: Field work, Just wondering, Lingping, Kru Boom, Kru Ae.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                if (labels.isEmpty()) {
+                    Text("No own labels yet.", style = MaterialTheme.typography.bodyMedium)
+                }
+                labels.forEach { c ->
+                    if (renaming?.key == c.key) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                renameText, { renameText = it }, singleLine = true,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(
+                                enabled = renameText.isNotBlank(),
+                                onClick = { onRename(c.key, renameText); renaming = null },
+                            ) { Text("OK") }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(c.label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                            IconButton(onClick = { renaming = c; renameText = c.label }) {
+                                Icon(Icons.Filled.Edit, contentDescription = "Rename")
+                            }
+                            IconButton(onClick = { onRemove(c.key) }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Remove")
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        newLabel, { newLabel = it }, singleLine = true,
+                        label = { Text("New label") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        enabled = newLabel.isNotBlank(),
+                        onClick = { onAdd(newLabel); newLabel = "" },
+                    ) { Text("Add") }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "A removed label disappears from the selection. Words that use it keep it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
