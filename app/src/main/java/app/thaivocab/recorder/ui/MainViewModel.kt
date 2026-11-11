@@ -181,7 +181,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         SyncWorker.schedule(getApplication())
     }
 
-    fun saveEdit(entry: VocabEntry, thai: String, notes: String) {
+    fun saveEdit(entry: VocabEntry, thai: String, notes: String, context: CaptureContext = entry.context) {
         val newThai = thai.trim().ifEmpty { null }
         // Keep the recogniser's other candidates, including the old main one.
         val alts = (listOfNotNull(entry.thai) + entry.alternatives).filter { it != newThai }.distinct()
@@ -190,6 +190,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 thai = newThai,
                 alternatives = alts,
                 notes = notes.trim().ifEmpty { null },
+                context = context,
                 transcription = if (newThai != entry.thai) Transcription.MANUAL else entry.transcription,
                 // New Thai text: the server adds a new meaning and romanization.
                 english = if (newThai != entry.thai) null else entry.english,

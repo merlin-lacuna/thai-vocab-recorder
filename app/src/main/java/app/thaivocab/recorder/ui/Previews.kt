@@ -83,5 +83,5 @@ fun PreviewEmpty() = ThaiVocabTheme(darkTheme = false) {
 @Preview(name = "Edit dialog", showBackground = true, widthDp = 412)
 @Composable
 fun PreviewEditDialog() = ThaiVocabTheme(darkTheme = false) {
-    EditDialog(entry = SampleData.entries[1], onDismiss = {}, onSave = { _, _ -> }, onDelete = {}, onPlay = {})
+    EditDialog(entry = SampleData.entries[1], onDismiss = {}, onSave = { _, _, _ -> }, onDelete = {}, onPlay = {})
 }

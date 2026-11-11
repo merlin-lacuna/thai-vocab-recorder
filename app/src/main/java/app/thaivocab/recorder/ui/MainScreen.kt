@@ -162,7 +162,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         EditDialog(
             entry = entry,
             onDismiss = { editing = null },
-            onSave = { thai, notes -> vm.saveEdit(entry, thai, notes); editing = null },
+            onSave = { thai, notes, context -> vm.saveEdit(entry, thai, notes, context); editing = null },
             onDelete = { vm.delete(entry); editing = null },
             onPlay = { vm.play(entry) },
             onRetry = { vm.retryTranscription(entry); editing = null },

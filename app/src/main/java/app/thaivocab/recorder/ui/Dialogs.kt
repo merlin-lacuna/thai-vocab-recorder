@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
+import app.thaivocab.recorder.data.CaptureContext
 import app.thaivocab.recorder.data.VocabEntry
 import app.thaivocab.recorder.sync.SupabaseConfig
 import kotlinx.coroutines.launch
@@ -44,13 +46,14 @@ import kotlinx.coroutines.launch
 fun EditDialog(
     entry: VocabEntry,
     onDismiss: () -> Unit,
-    onSave: (thai: String, notes: String) -> Unit,
+    onSave: (thai: String, notes: String, context: CaptureContext) -> Unit,
     onDelete: () -> Unit,
     onPlay: () -> Unit,
     onRetry: () -> Unit = {},
 ) {
     var thai by remember { mutableStateOf(entry.thai.orEmpty()) }
     var notes by remember { mutableStateOf(entry.notes.orEmpty()) }
+    var context by remember { mutableStateOf(entry.context) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     AlertDialog(
@@ -88,9 +91,16 @@ fun EditDialog(
                     label = { Text("Notes (meaning, where you heard it…)") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(8.dp))
+                Text("Context:", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    CaptureContext.entries.forEach { c ->
+                        FilterChip(selected = c == context, onClick = { context = c }, label = { Text(c.label) })
+                    }
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(thai, notes) }) { Text("Save") } },
+        confirmButton = { TextButton(onClick = { onSave(thai, notes, context) }) { Text("Save") } },
         dismissButton = {
             Row {
                 TextButton(onClick = { if (confirmDelete) onDelete() else confirmDelete = true }) {
