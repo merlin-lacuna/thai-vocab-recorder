@@ -1,4 +1,4 @@
-package app.thaivocab.recorder.sync
+package app.thaivocab.core.sync
 
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow

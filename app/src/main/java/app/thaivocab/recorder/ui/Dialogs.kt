@@ -6,7 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import app.thaivocab.recorder.data.CustomContext
+import app.thaivocab.core.data.CustomContext
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -42,9 +42,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
-import app.thaivocab.recorder.data.CaptureContext
-import app.thaivocab.recorder.data.VocabEntry
-import app.thaivocab.recorder.sync.SupabaseConfig
+import app.thaivocab.core.data.CaptureContext
+import app.thaivocab.core.data.VocabEntry
+import app.thaivocab.core.sync.SupabaseConfig
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)

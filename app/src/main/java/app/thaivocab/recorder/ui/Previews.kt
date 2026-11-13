@@ -2,9 +2,9 @@ package app.thaivocab.recorder.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
-import app.thaivocab.recorder.data.CaptureContext
-import app.thaivocab.recorder.data.Transcription
-import app.thaivocab.recorder.data.VocabEntry
+import app.thaivocab.core.data.CaptureContext
+import app.thaivocab.core.data.Transcription
+import app.thaivocab.core.data.VocabEntry
 
 /**
  * Sample data and preview functions. Android Studio shows these screens in the

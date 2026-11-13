@@ -1,5 +1,6 @@
-package app.thaivocab.recorder.data
+package app.thaivocab.core.data
 
+import app.thaivocab.core.AppProfile
 import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
@@ -37,7 +38,7 @@ data class VocabEntry(
     val english: String? = null,
     val romanization: String? = null,
     /** Input that created the row; kept when the phone edits rows from other sources. */
-    val source: String = "field_recorder",
+    val source: String = AppProfile.source,
     /** Native Thai pronunciation: local file, path in the cloud, and who made it. */
     val nativeAudioFile: String? = null,
     val nativeAudioPath: String? = null,
@@ -284,7 +285,7 @@ class VocabStore private constructor(context: Context) :
             transcriptionError = str("transcription_error"),
             english = str("english"),
             romanization = str("romanization"),
-            source = str("source") ?: "field_recorder",
+            source = str("source") ?: AppProfile.source,
             nativeAudioFile = str("native_audio_file"),
             nativeAudioPath = str("native_audio_path"),
             nativeAudioSource = str("native_audio_source"),

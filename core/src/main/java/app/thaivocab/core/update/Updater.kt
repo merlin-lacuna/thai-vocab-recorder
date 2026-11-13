@@ -1,8 +1,9 @@
-package app.thaivocab.recorder.update
+package app.thaivocab.core.update
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import androidx.core.content.pm.PackageInfoCompat
+import app.thaivocab.core.AppProfile
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,13 +22,12 @@ class Updater(private val context: Context) {
     data class Available(val versionCode: Long, val versionName: String)
 
     val installedVersion: Long
-        get() = context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(0))
-            .longVersionCode
+        get() = PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0))
 
     /** Returns the newer build, or null when the installed build is current (or on any error). */
     suspend fun check(): Available? = withContext(Dispatchers.IO) {
         runCatching {
-            val json = JSONObject(String(get("$RELEASE_URL/version.json")))
+            val json = JSONObject(String(get("$RELEASE_URL/${AppProfile.releaseVersionFile}")))
             val code = json.getLong("versionCode")
             if (code > installedVersion) Available(code, json.optString("versionName", code.toString())) else null
         }.getOrNull()
@@ -37,8 +37,8 @@ class Updater(private val context: Context) {
     suspend fun download(onProgress: (Float) -> Unit): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() } // old downloads
-        val target = File(dir, "thai-vocab-recorder.apk")
-        val conn = open("$RELEASE_URL/thai-vocab-recorder.apk")
+        val target = File(dir, AppProfile.releaseApk)
+        val conn = open("$RELEASE_URL/${AppProfile.releaseApk}")
         try {
             val total = conn.contentLengthLong.takeIf { it > 0 } ?: -1
             conn.inputStream.use { input ->

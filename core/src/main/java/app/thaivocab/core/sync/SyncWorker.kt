@@ -1,5 +1,6 @@
-package app.thaivocab.recorder.sync
+package app.thaivocab.core.sync
 
+import app.thaivocab.core.AppProfile
 import android.content.Context
 import android.util.Log
 import androidx.work.BackoffPolicy
@@ -11,12 +12,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import app.thaivocab.recorder.data.CaptureContext
-import app.thaivocab.recorder.data.ContextCatalog
-import app.thaivocab.recorder.data.CustomContext
-import app.thaivocab.recorder.data.Transcription
-import app.thaivocab.recorder.data.VocabEntry
-import app.thaivocab.recorder.data.VocabStore
+import app.thaivocab.core.data.CaptureContext
+import app.thaivocab.core.data.ContextCatalog
+import app.thaivocab.core.data.CustomContext
+import app.thaivocab.core.data.Transcription
+import app.thaivocab.core.data.VocabEntry
+import app.thaivocab.core.data.VocabStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -258,7 +259,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             transcriptionError = str("transcription_error"),
             english = str("english"),
             romanization = str("romanization"),
-            source = str("source") ?: SOURCE,
+            source = str("source") ?: AppProfile.source,
             nativeAudioPath = str("native_audio_path"),
             nativeAudioSource = str("native_audio_source"),
             nativeAudioFile = str("native_audio_path")?.let { path ->
@@ -298,7 +299,6 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         private const val TAG = "SyncWorker"
         const val TABLE = "vocab_items"
         const val AUDIO_BUCKET = "vocab-audio"
-        const val SOURCE = "field_recorder"
         private const val CONTEXTS_TABLE = "capture_contexts"
         private const val PULL_LIMIT = 500
         private const val AUDIO_DOWNLOAD_LIMIT = 100

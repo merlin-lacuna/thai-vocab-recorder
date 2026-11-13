@@ -93,9 +93,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
-import app.thaivocab.recorder.data.CaptureContext
-import app.thaivocab.recorder.data.Transcription
-import app.thaivocab.recorder.data.VocabEntry
+import app.thaivocab.core.data.CaptureContext
+import app.thaivocab.core.data.Transcription
+import app.thaivocab.core.data.VocabEntry
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -484,7 +484,7 @@ private fun EntryRow(
     ) {
         Column(Modifier.weight(1f)) {
             when {
-                entry.thai != null -> Text(entry.thai, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                entry.thai != null -> Text(entry.thai.orEmpty(), fontSize = 26.sp, fontWeight = FontWeight.Medium)
                 entry.transcription == Transcription.PENDING -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
