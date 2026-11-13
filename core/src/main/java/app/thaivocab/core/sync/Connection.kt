@@ -3,6 +3,9 @@ package app.thaivocab.core.sync
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 /** Sign-in and sign-out for Supabase. Used by the connection window of both apps. */
 class Connection(context: Context) {
@@ -29,6 +32,13 @@ class Connection(context: Context) {
                 draftPassword = ""
                 SyncWorker.schedule(app)
                 null
+            } catch (e: UnknownHostException) {
+                // Android reports "Unable to resolve host" when the device is offline.
+                NO_INTERNET
+            } catch (e: ConnectException) {
+                NO_INTERNET
+            } catch (e: SocketTimeoutException) {
+                NO_INTERNET
             } catch (e: Exception) {
                 e.message ?: e.toString()
             }
@@ -39,4 +49,8 @@ class Connection(context: Context) {
     fun disconnect() = config.save { remove("refresh_token"); remove("user_id") }
 
     fun syncNow() = SyncWorker.schedule(app)
+
+    private companion object {
+        const val NO_INTERNET = "No internet connection. Switch on Wi-Fi and try again."
+    }
 }
