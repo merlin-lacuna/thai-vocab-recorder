@@ -12,7 +12,7 @@ import app.thaivocab.core.data.CustomContext
 import app.thaivocab.core.data.Transcription
 import app.thaivocab.core.data.VocabEntry
 import app.thaivocab.core.data.VocabStore
-import app.thaivocab.core.sync.SupabaseApi
+import app.thaivocab.core.sync.Connection
 import app.thaivocab.core.sync.SupabaseConfig
 import app.thaivocab.core.sync.SyncWorker
 import app.thaivocab.core.update.Updater
@@ -31,6 +31,7 @@ import java.util.UUID
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val store = VocabStore.get(app)
     private val config = SupabaseConfig.get(app)
+    val connection = Connection(app)
     private val recorder = WavRecorder()
     private val contextSetting = ContextSetting(app)
     val captureContext: StateFlow<CaptureContext> = contextSetting.current
@@ -301,7 +302,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _playProgress.value = 0f
     }
 
-    fun syncNow() = SyncWorker.schedule(getApplication())
+    fun syncNow() = connection.syncNow()
 
     /** Checks GitHub for a newer build, at most every 10 minutes. */
     fun checkForUpdate() {
@@ -325,35 +326,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
-
-    /** Signs in to Supabase. Returns an error message, or null on success. */
-    suspend fun connect(url: String, apiKey: String, email: String, password: String): String? =
-        withContext(Dispatchers.IO) {
-            val cleanUrl = url.trim().trimEnd('/')
-            try {
-                val session = SupabaseApi(cleanUrl, apiKey.trim()).signIn(email.trim(), password)
-                config.save {
-                    putString("url", cleanUrl)
-                    putString("api_key", apiKey.trim())
-                    putString("email", email.trim())
-                    putString("user_id", session.userId)
-                    putString("refresh_token", session.refreshToken)
-                    remove("last_error")
-                }
-                draftPassword = ""
-                SyncWorker.schedule(getApplication())
-                null
-            } catch (e: Exception) {
-                e.message ?: e.toString()
-            }
-        }
-
-    /** Password typed in the set-up window. Kept in memory only, never written to storage. */
-    var draftPassword: String = ""
-
-    fun saveSetupDraft(url: String, apiKey: String, email: String) = config.saveDraft(url, apiKey, email)
-
-    fun disconnect() = config.save { remove("refresh_token"); remove("user_id") }
 
     fun showMessage(text: String) {
         _message.value = text

@@ -1,5 +1,8 @@
 package app.thaivocab.recorder.ui
 
+import app.thaivocab.core.ui.LabelActionDialog
+import app.thaivocab.core.ui.LabelsDialog
+import app.thaivocab.core.ui.SetupDialog
 import android.Manifest
 import android.content.pm.PackageManager
 import android.view.HapticFeedbackConstants
@@ -201,7 +204,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
         )
     }
     if (showSetup) {
-        SetupDialog(vm = vm, state = supabase, onDismiss = { showSetup = false })
+        SetupDialog(connection = vm.connection, state = supabase, onDismiss = { showSetup = false })
     }
 }
 
