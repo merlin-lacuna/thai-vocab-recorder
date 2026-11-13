@@ -13,8 +13,8 @@ import org.json.JSONArray
 import java.io.File
 
 
-/** How far the Thai speech-to-text step has come for one entry. */
-enum class Transcription { PENDING, DONE, FAILED, MANUAL }
+/** How far the text recognition step (speech or handwriting) has come for one entry. */
+enum class Transcription { PENDING, DONE, GUESSED, FAILED, MANUAL }
 
 /**
  * One captured word or phrase, as stored on the phone.
@@ -46,6 +46,18 @@ data class VocabEntry(
     val nativeAudioUploaded: Boolean = true,
     /** The user removed the native clip on the phone: the next upload empties it on the server. */
     val nativeCleared: Boolean = false,
+    /** Handwriting from the tablet: local PNG of the upper zone (Thai or phonetic). */
+    val imageFile: String? = null,
+    /** Local PNG of the lower zone (the user's English translation), if the user wrote one. */
+    val englishImageFile: String? = null,
+    val imagesUploaded: Boolean = true,
+    /** The user removed the handwriting image: the next upload empties the paths on the server. */
+    val imageCleared: Boolean = false,
+    /** "thai" or "phonetic": which Next button the user pressed. */
+    val writtenScript: String? = null,
+    /** The two zones as Claude read them. Read-only on the device. */
+    val writtenText: String? = null,
+    val writtenEnglish: String? = null,
     val transcription: Transcription,
     /** True when the local version has changes that are not in the cloud yet. */
     val dirty: Boolean,
@@ -55,7 +67,7 @@ data class VocabEntry(
 
 /** Small SQLite store on the phone. One instance per process. */
 class VocabStore private constructor(context: Context) :
-    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 6) {
+    SQLiteOpenHelper(context.applicationContext, "vocab.db", null, 7) {
 
     private val catalog = ContextCatalog.get(context)
 
@@ -92,7 +104,14 @@ class VocabStore private constructor(context: Context) :
                 native_audio_path TEXT,
                 native_audio_source TEXT,
                 native_audio_uploaded INTEGER NOT NULL DEFAULT 1,
-                native_cleared INTEGER NOT NULL DEFAULT 0
+                native_cleared INTEGER NOT NULL DEFAULT 0,
+                image_file TEXT,
+                english_image_file TEXT,
+                images_uploaded INTEGER NOT NULL DEFAULT 1,
+                image_cleared INTEGER NOT NULL DEFAULT 0,
+                written_script TEXT,
+                written_text TEXT,
+                written_english TEXT
             )
             """.trimIndent()
         )
@@ -113,6 +132,15 @@ class VocabStore private constructor(context: Context) :
             db.execSQL("ALTER TABLE entries ADD COLUMN native_audio_uploaded INTEGER NOT NULL DEFAULT 1")
         }
         if (oldVersion < 6) db.execSQL("ALTER TABLE entries ADD COLUMN native_cleared INTEGER NOT NULL DEFAULT 0")
+        if (oldVersion < 7) {
+            db.execSQL("ALTER TABLE entries ADD COLUMN image_file TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN english_image_file TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN images_uploaded INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE entries ADD COLUMN image_cleared INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE entries ADD COLUMN written_script TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN written_text TEXT")
+            db.execSQL("ALTER TABLE entries ADD COLUMN written_english TEXT")
+        }
     }
 
     @Synchronized
@@ -157,6 +185,8 @@ class VocabStore private constructor(context: Context) :
         if (unchanged && e.deleted) {
             e.audioFile?.let { File(it).delete() }
             e.nativeAudioFile?.let { File(it).delete() }
+            e.imageFile?.let { File(it).delete() }
+            e.englishImageFile?.let { File(it).delete() }
             writableDatabase.delete("entries", "id = ?", arrayOf(id))
         } else {
             val values = ContentValues().apply {
@@ -174,6 +204,12 @@ class VocabStore private constructor(context: Context) :
             put("native_audio_uploaded", 1)
             put("native_audio_path", path)
         }
+        writableDatabase.update("entries", values, "id = ?", arrayOf(id))
+    }
+
+    @Synchronized
+    fun markImagesUploaded(id: String) {
+        val values = ContentValues().apply { put("images_uploaded", 1) }
         writableDatabase.update("entries", values, "id = ?", arrayOf(id))
     }
 
@@ -263,6 +299,13 @@ class VocabStore private constructor(context: Context) :
         put("native_audio_source", nativeAudioSource)
         put("native_audio_uploaded", if (nativeAudioUploaded) 1 else 0)
         put("native_cleared", if (nativeCleared) 1 else 0)
+        put("image_file", imageFile)
+        put("english_image_file", englishImageFile)
+        put("images_uploaded", if (imagesUploaded) 1 else 0)
+        put("image_cleared", if (imageCleared) 1 else 0)
+        put("written_script", writtenScript)
+        put("written_text", writtenText)
+        put("written_english", writtenEnglish)
     }
 
     private fun Cursor.toEntry(): VocabEntry {
@@ -291,6 +334,13 @@ class VocabStore private constructor(context: Context) :
             nativeAudioSource = str("native_audio_source"),
             nativeAudioUploaded = long("native_audio_uploaded") == 1L,
             nativeCleared = long("native_cleared") == 1L,
+            imageFile = str("image_file"),
+            englishImageFile = str("english_image_file"),
+            imagesUploaded = long("images_uploaded") == 1L,
+            imageCleared = long("image_cleared") == 1L,
+            writtenScript = str("written_script"),
+            writtenText = str("written_text"),
+            writtenEnglish = str("written_english"),
         )
     }
 

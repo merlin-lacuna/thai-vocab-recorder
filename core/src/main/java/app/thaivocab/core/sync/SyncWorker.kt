@@ -65,7 +65,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
         for (entry in pending) {
             try {
                 var audioUploaded = entry.audioUploaded
-                val audioPath = entry.audioFile?.let { "${session.userId}/${entry.id}.wav" }
+                val audioPath = entry.audioFile?.let { audioPath(session.userId, entry.id) }
                 if (!entry.deleted && entry.audioFile != null && !audioUploaded) {
                     val file = File(entry.audioFile)
                     if (file.exists()) {
@@ -83,16 +83,28 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     store.markNativeUploaded(entry.id, path)
                     toSend = entry.copy(nativeAudioPath = path, nativeAudioUploaded = true)
                 }
-                api.upsert(session.accessToken, TABLE, toSend.toRow(audioPath))
+                // Handwriting images from the tablet.
+                if (!entry.deleted && !entry.imagesUploaded) {
+                    entry.imageFile?.let { File(it) }?.takeIf { it.exists() }?.let {
+                        api.uploadFile(session.accessToken, HANDWRITING_BUCKET, imagePath(session.userId, entry.id), it, "image/png")
+                    }
+                    entry.englishImageFile?.let { File(it) }?.takeIf { it.exists() }?.let {
+                        api.uploadFile(session.accessToken, HANDWRITING_BUCKET, englishImagePath(session.userId, entry.id), it, "image/png")
+                    }
+                    store.markImagesUploaded(entry.id)
+                }
+                api.upsert(session.accessToken, TABLE, toSend.toRow(session.userId))
 
-                // Step 1 on the server: Thai text from ElevenLabs. The result is saved
+                // Step 1 on the server: Thai text. A recording is transcribed by ElevenLabs
+                // ("transcribe"); handwriting is read by Claude ("read"). The result is saved
                 // locally at once, so the list shows the Thai text before step 2 starts.
                 // Network problems are thrown, so the entry stays "not uploaded" and the
                 // job retries later.
                 var transcribed: VocabEntry? = null
                 if (!entry.deleted && entry.transcription == Transcription.PENDING) {
                     try {
-                        transcribed = api.process(session.accessToken, entry.id, "transcribe").toEntry(audioDir)
+                        val step = if (entry.imageFile != null) "read" else "transcribe"
+                        transcribed = api.process(session.accessToken, entry.id, step).toEntry(audioDir)
                     } catch (e: HttpException) {
                         Log.w(TAG, "transcribe failed for ${entry.id}", e)
                         config.setError(e.message)
@@ -180,7 +192,8 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             token, TABLE,
             "select=id,thai,thai_alternatives,notes,audio_path,context,teacher,transcription_status," +
                 "transcription_error,english,romanization,captured_at,updated_at,deleted_at," +
-                "enrichment_status,enrichment_error,source,native_audio_path,native_audio_source" +
+                "enrichment_status,enrichment_error,source,native_audio_path,native_audio_source," +
+                "image_path,english_image_path,written_script,written_text,written_english" +
                 "&order=captured_at.desc&limit=$PULL_LIMIT",
         )
         val audioDir = File(applicationContext.filesDir, "audio")
@@ -229,6 +242,19 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 tmp.writeBytes(bytes)
                 tmp.renameTo(target)
             }
+
+        // Fetch handwriting images that are missing on the device, newest first.
+        remote.asSequence().filter { !it.deleted }.take(AUDIO_DOWNLOAD_LIMIT).forEach { e ->
+            listOf(e.imageFile to imagePath(userId, e.id), e.englishImageFile to englishImagePath(userId, e.id))
+                .forEach { (local, path) ->
+                    val target = local?.let { File(it) } ?: return@forEach
+                    if (target.exists()) return@forEach
+                    target.parentFile?.mkdirs()
+                    val tmp = File(target.path + ".part")
+                    tmp.writeBytes(api.downloadFile(token, HANDWRITING_BUCKET, path))
+                    tmp.renameTo(target)
+                }
+        }
     }
 
     private fun JSONObject.toEntry(audioDir: File): VocabEntry {
@@ -246,12 +272,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
             audioFile = str("audio_path")?.let { File(audioDir, "$id.wav").absolutePath },
             capturedAt = time("captured_at") ?: 0L,
             updatedAt = time("updated_at") ?: 0L,
-            transcription = when (str("transcription_status")) {
-                "done" -> Transcription.DONE
-                "failed" -> Transcription.FAILED
-                "pending" -> Transcription.PENDING
-                else -> if (thai != null) Transcription.MANUAL else Transcription.FAILED
-            },
+            transcription = transcriptionOf(str("transcription_status"), thai != null),
             dirty = false,
             audioUploaded = true,
             deleted = str("deleted_at") != null,
@@ -266,39 +287,18 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                 File(audioDir, "native_$id.${path.substringAfterLast('.', "wav")}").absolutePath
             },
             nativeAudioUploaded = true,
+            imageFile = str("image_path")?.let { File(audioDir.parentFile, "handwriting/$id.png").absolutePath },
+            englishImageFile = str("english_image_path")?.let { File(audioDir.parentFile, "handwriting/$id-en.png").absolutePath },
+            imagesUploaded = true,
+            writtenScript = str("written_script"),
+            writtenText = str("written_text"),
+            writtenEnglish = str("written_english"),
         )
-    }
-
-    private fun VocabEntry.toRow(audioPath: String?) = JSONObject().apply {
-        put("id", id)
-        put("thai", thai ?: JSONObject.NULL)
-        put("thai_alternatives", JSONArray(alternatives))
-        put("notes", notes ?: JSONObject.NULL)
-        put("audio_path", audioPath ?: JSONObject.NULL)
-        put("source", source)
-        // Native clip fields only when known, so a stale phone never erases a clip that a
-        // batch job added in the meantime.
-        if (nativeCleared) {
-            // The user removed the native clip on the phone.
-            put("native_audio_path", JSONObject.NULL)
-            put("native_audio_source", JSONObject.NULL)
-        } else {
-            nativeAudioPath?.let { put("native_audio_path", it) }
-            nativeAudioSource?.let { put("native_audio_source", it) }
-        }
-        put("context", context.dbValue)
-        put("teacher", context.teacher ?: JSONObject.NULL)
-        put("transcription_error", transcriptionError ?: JSONObject.NULL)
-        put("transcription_status", transcription.name.lowercase())
-        put("captured_at", Instant.ofEpochMilli(capturedAt).toString())
-        put("updated_at", Instant.ofEpochMilli(updatedAt).toString())
-        put("deleted_at", if (deleted) Instant.ofEpochMilli(updatedAt).toString() else JSONObject.NULL)
     }
 
     companion object {
         private const val TAG = "SyncWorker"
         const val TABLE = "vocab_items"
-        const val AUDIO_BUCKET = "vocab-audio"
         private const val CONTEXTS_TABLE = "capture_contexts"
         private const val PULL_LIMIT = 500
         private const val AUDIO_DOWNLOAD_LIMIT = 100
