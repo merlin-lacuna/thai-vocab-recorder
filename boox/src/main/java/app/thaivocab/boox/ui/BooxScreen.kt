@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
@@ -212,7 +213,12 @@ fun BooxContent(
             SyncBar(connected, entries.count { it.dirty }, syncError, onSyncBarClick)
             HorizontalDivider(color = Ink, thickness = 2.dp)
 
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+            // A new entry is inserted at the top. Without this scroll, the list keeps its old
+            // position and the new row stays above the visible area.
+            val listState = rememberLazyListState()
+            val newestId = entries.firstOrNull()?.id
+            LaunchedEffect(newestId) { listState.scrollToItem(0) }
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
                 items(entries, key = { it.id }) { entry ->
                     EntryRow(entry, onClick = { onEntryClick(entry) })
                     HorizontalDivider(color = Grey, thickness = 1.dp)
@@ -361,7 +367,12 @@ private fun EntryRow(entry: VocabEntry, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        HandwritingImage(entry.imageFile, Modifier.width(220.dp).height(96.dp))
+        if (entry.imageFile != null) {
+            HandwritingImage(entry.imageFile, Modifier.width(220.dp).height(96.dp))
+        } else {
+            // A word from the phone has no handwriting: keep the text in the same column.
+            Spacer(Modifier.width(220.dp))
+        }
         Spacer(Modifier.width(18.dp))
         Column(Modifier.weight(1f)) {
             val thai = entry.thai
