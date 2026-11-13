@@ -64,6 +64,7 @@ class InkView(context: Context, private val onInkChanged: (thaiInk: Boolean) -> 
     private fun add(stroke: Stroke) {
         if (stroke.points.isEmpty()) return
         strokes += stroke
+        Log.d("InkView", "stroke ${strokes.size}: ${stroke.points.size} points, starts at ${stroke.points.first()} in a box of $width x $height")
         onInkChanged(splitZones(strokes, height.toFloat()).first.isNotEmpty())
     }
 
