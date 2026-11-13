@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
@@ -228,6 +229,9 @@ fun BooxContent(
                     .padding(horizontal = 16.dp, vertical = 6.dp)
                     .border(2.dp, Ink)
                     .padding(2.dp)
+                    // On Android 11, a SurfaceView clears the whole drawing area that it is
+                    // given. Without this clip, it erases everything drawn above the box.
+                    .clipToBounds()
             ) { pad() }
 
             Row(

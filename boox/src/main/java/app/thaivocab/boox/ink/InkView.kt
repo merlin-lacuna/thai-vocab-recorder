@@ -21,6 +21,7 @@ import com.onyx.android.sdk.pen.data.TouchPointList
  * On a Boox device, the Onyx pen library draws the ink while the pen moves and delivers each
  * finished stroke to [callback]. On other devices, [onTouchEvent] collects and draws the strokes.
  */
+
 @SuppressLint("ViewConstructor")
 class InkView(context: Context, private val onInkChanged: (thaiInk: Boolean) -> Unit) :
     SurfaceView(context), SurfaceHolder.Callback {
