@@ -8,7 +8,36 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  # Finds out which app the push changed. A change in core/ or in the build files
+  # affects both apps.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      recorder: ${{ steps.filter.outputs.recorder }}
+      boox: ${{ steps.filter.outputs.boox }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared: &shared
+              - 'core/**'
+              - 'gradle/**'
+              - '*.gradle.kts'
+              - 'gradle.properties'
+              - '.github/workflows/**'
+            recorder:
+              - *shared
+              - 'app/**'
+            boox:
+              - *shared
+              - 'boox/**'
+
+  # Phone app (app/).
+  recorder:
+    needs: changes
+    if: needs.changes.outputs.recorder == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -22,7 +51,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Build release APK
-        run: ./gradlew --no-daemon assembleRelease
+        run: ./gradlew --no-daemon :core:testDebugUnitTest :app:assembleRelease
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk thai-vocab-recorder.apk
@@ -35,9 +64,8 @@ jobs:
 
       # Screenshots of the main screens, drawn without a phone (Paparazzi).
       - name: Screenshots
-        id: screenshots
         continue-on-error: true
-        run: ./gradlew --no-daemon recordPaparazziDebug
+        run: ./gradlew --no-daemon :app:recordPaparazziDebug
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -65,3 +93,61 @@ jobs:
           files: |
             thai-vocab-recorder.apk
             version.json
+
+  # Boox tablet app (boox/).
+  boox:
+    needs: changes
+    if: needs.changes.outputs.boox == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        run: ./gradlew --no-daemon :core:testDebugUnitTest :boox:testDebugUnitTest --tests "*InkTest" :boox:assembleRelease
+
+      - name: Rename APK
+        run: cp boox/build/outputs/apk/release/boox-release.apk thai-vocab-boox.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thai-vocab-boox-apk
+          path: thai-vocab-boox.apk
+          retention-days: 30
+
+      - name: Screenshots
+        continue-on-error: true
+        run: ./gradlew --no-daemon :boox:recordPaparazziDebug
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-boox
+          path: boox/src/test/snapshots/images/*.png
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # The tablet app reads version-boox.json for its own "Install update" banner.
+      # This step adds two files to the same "latest" release and keeps the phone app's files.
+      - name: Write version-boox.json
+        if: github.ref_name == github.event.repository.default_branch
+        run: |
+          echo '{"versionCode": ${{ github.run_number }}, "versionName": "0.1.${{ github.run_number }}"}' > version-boox.json
+
+      - name: Publish latest release
+        if: github.ref_name == github.event.repository.default_branch
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          make_latest: true
+          overwrite_files: true
+          files: |
+            thai-vocab-boox.apk
+            version-boox.json

@@ -1,7 +1,13 @@
 # Thai Vocab Recorder – notes for AI agents
 
-- Android app (Kotlin, Jetpack Compose) in `app/`, database and server functions for
-  Supabase in `supabase/`. Overview and set-up: `README.md`.
+- Two Android apps (Kotlin, Jetpack Compose): the phone recorder in `app/` and the Boox
+  tablet app in `boox/`. Shared code (store, sync, updater, shared windows) is in `core/`;
+  a change there affects both apps, so build both. Database and server functions for
+  Supabase are in `supabase/`. Overview and set-up: `README.md`.
+- Gradle needs JDK 17 or newer. On the user's Windows computer:
+  `export JAVA_HOME="$HOME/.jdks/jbr-21.0.11"`.
+- The Boox freezes an app after an install over USB. Run
+  `adb shell pm enable app.thaivocab.boox` before `adb shell am start`.
 - **Batch import of existing recordings or transcriptions into the database:**
   follow `docs/batch-import.md`.
 - Database changes: add a new file in `supabase/migrations/`; never edit an applied one.

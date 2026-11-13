@@ -26,9 +26,12 @@ database later.
 
 | Part | Location | Purpose |
 |---|---|---|
-| Android app | `app/` | Kotlin + Jetpack Compose. Works offline; uploads when the phone has a network connection. |
+| Phone app | `app/` | The recorder. Kotlin + Jetpack Compose. Works offline; uploads when the phone has a network connection. |
+| Tablet app | `boox/` | Handwriting capture for the Boox Note Air2 Plus (see "Tablet app (Boox)" below). |
+| Shared code | `core/` | Local store, Supabase client, sync job, updater and the windows that both apps use. A change here affects both apps. |
+| Server function | `supabase/functions/process/` | Edge Function with the steps `transcribe` (speech), `read` (handwriting) and `enrich` (meaning). |
 | Database schema | `supabase/migrations/` | Tables, security rules and audio storage for Supabase (hosted PostgreSQL). One SQL file per change, applied in name order. |
-| Build | `.github/workflows/build.yml` | GitHub Actions builds the APK on every push. |
+| Build | `.github/workflows/build.yml` | GitHub Actions builds the app that a push changed (both apps for a change in `core/`). |
 
 ## Set-up (one time, about 10 minutes)
 
@@ -122,6 +125,54 @@ The app stores only a login token; the password is not saved.
 * **Edits and deletes** on the phone are also uploaded. A delete sets `deleted_at` in the
   database (soft delete), so other apps can ignore the item.
 
+## Tablet app (Boox)
+
+The app in `boox/` ("Thai Writing") captures words that you write with the pen on a Boox
+Note Air2 Plus (Android 11). It writes to the same table `vocab_items` as the phone app,
+with `source = 'boox_handwriting'`, and it shows the words from the phone in its list.
+
+```
+ ┌────────────────────────────────────────────┐
+ │ ☁ All saved to database                    │  ← tap to connect the database
+ ├────────────────────────────────────────────┤
+ │ [handwriting]  มด                           │  ← tap a row to correct or delete it
+ │                mót · ant                   │
+ ├────────────────────────────────────────────┤
+ │ [Field work] Lingping 🎓Boom 🎓Ae ✎ Labels  │  ← the same labels as on the phone
+ │ ┌────────────────────────────────────────┐ │
+ │ │ THAI OR PHONETIC                       │ │  ← write the word here
+ │ ├────────────────────────────────────────┤ │
+ │ │ ENGLISH, OPTIONAL                      │ │  ← your own translation, if you want
+ │ └────────────────────────────────────────┘ │
+ │ [Clear] [⌨] [Next: Phonetic] [Next: ไทย]   │
+ └────────────────────────────────────────────┘
+```
+
+* **Install:** download `thai-vocab-boox.apk` from **Releases → Latest build** on the
+  tablet, or install it over USB (`adb install`). For USB, switch on **USB Debug Mode** on
+  the Boox: **Apps** tab → menu at the top right → **Manage apps**.
+* **Write and save:** write a word or a short phrase in the upper zone. Press
+  **Next: ไทย** when you wrote Thai script, or **Next: Phonetic** when you wrote the sound
+  in Latin letters. The app saves the handwriting as PNG images, clears the box at once,
+  and shows the new row at the top of the list. The app does not ask any question.
+* **Two zones:** a stroke belongs to the zone where it starts, so a long tail of a Thai
+  letter may cross the line. The lower zone can stay empty.
+* **Reading:** the sync job uploads the images to the Storage bucket `vocab-handwriting`
+  and calls the Edge Function `process` with `step: "read"`. Claude reads the images. The
+  button that you pressed is stored in `written_script`, so Claude does not have to decide
+  which script the image contains. Your English translation is given to Claude as a hint.
+  * Thai script: the text goes into `thai`, with up to four other readings in
+    `thai_alternatives`. The status becomes `done`.
+  * Phonetic: the Latin letters go into `written_text`, and the most likely Thai word goes
+    into `thai`. The status becomes `guessed`, and the row shows the mark **GUESSED**.
+  * The app then calls `step: "enrich"`, as the phone does. `enrich` writes its own meaning
+    into `english`; your translation stays in `written_english`. The row shows both.
+* **Edit a word** (tap it): Thai text, notes, context, **Read again as the other type**
+  (when you pressed the wrong Next button), **Remove handwriting image**, **Delete**.
+* **Pen input:** the Onyx pen library (`onyxsdk-pen`) draws the ink without delay. On a
+  device without that library, the app draws from normal touch events.
+* **Offline:** entries wait on the tablet and are uploaded and read when Wi-Fi returns.
+
 ## The database, for other apps
 
 Table `vocab_items` (see `supabase/migrations/` for all columns). The numbers refer
@@ -132,9 +183,12 @@ to the hand-written specification (171.0 – 171.11).
 | `id` | 11 | input app | UUID, created on the phone |
 | `captured_at` | 1 | input app | date and time (UTC) |
 | `context`, `teacher` | 0 | recorder | `field` (default), `wondering`, `lingping_club`, or `lesson` with teacher `Boom` / `Ae` |
-| `source` | 140 | each input app | `field_recorder`, later `lesson_recorder`, `pickup_thai`, … |
+| `source` | 140 | each input app | `field_recorder` (phone), `boox_handwriting` (tablet), later `lesson_recorder`, `pickup_thai`, … |
 | `thai`, `thai_alternatives` | 2 | recorder | Thai script from speech recognition, or typed |
 | `audio_path` | 7 | recorder | original recording in the Storage bucket `vocab-audio` (always kept) |
+| `image_path`, `english_image_path` | – | tablet | handwriting images of the upper and the lower zone, in the Storage bucket `vocab-handwriting` |
+| `written_script` | – | tablet | `thai` or `phonetic`: the Next button that the user pressed |
+| `written_text`, `written_english` | – | `read` step | the two zones as Claude read them |
 | `notes` | – | recorder | free text |
 | `romanization` | 3 | later | |
 | `english` | 4 | later | |
@@ -142,7 +196,7 @@ to the hand-written specification (171.0 – 171.11).
 | `part_of_speech` | 6 | later | `noun`, `verb`, `adjective`, `preposition`, `article`, `classifier`, `particle`, … |
 | `native_audio_path`, `native_audio_source` | 8 | batch job | native Thai pronunciation (text-to-speech API or a native speaker) to compare with your own recording; `native_audio_source` names the API and voice. See `docs/batch-import.md`, section 6. |
 | `quality`, `duplicate_of` | 172, 173 | admin | `ok`, `junk`, `mispronounced`, `duplicate` |
-| `transcription_status` | – | recorder | `pending`, `done`, `failed`, `manual` |
+| `transcription_status` | – | recorder, tablet | `pending`, `done`, `guessed` (Thai guessed from phonetic handwriting), `failed`, `manual` |
 | `enrichment_status` | – | enrichment step | `new` → `enriched` → `reviewed` |
 | `updated_at`, `deleted_at` | – | input app | `deleted_at` is set when you delete on the phone |
 
@@ -180,13 +234,17 @@ screens under **Actions → Build APK → (run) → Artifacts → screenshots**.
 
 ## Build on your own computer
 
-Open the project in Android Studio, or run:
+Open the project in Android Studio, or build one app by name. Gradle needs JDK 17 or newer.
 
 ```bash
-./gradlew assembleRelease
+./gradlew :app:assembleRelease
 ```
 
-The APK is in `app/build/outputs/apk/release/`.
+```bash
+./gradlew :boox:assembleRelease
+```
+
+The APK files are in `app/build/outputs/apk/release/` and `boox/build/outputs/apk/release/`.
 
 The signing key `app/personal.keystore` is in the repository on purpose: all builds then
 have the same signature, so a new APK installs over the old one. This is acceptable for
