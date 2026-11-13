@@ -10,7 +10,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Onyx pen library for the Boox tablet app.
+        maven { url = uri("https://repo.boox.com/repository/maven-public/") }
     }
 }
 rootProject.name = "ThaiVocabRecorder"
-include(":app", ":core")
+include(":app", ":core", ":boox")
