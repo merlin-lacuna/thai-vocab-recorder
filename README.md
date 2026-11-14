@@ -173,6 +173,45 @@ with `source = 'boox_handwriting'`, and it shows the words from the phone in its
   device without that library, the app draws from normal touch events.
 * **Offline:** entries wait on the tablet and are uploaded and read when Wi-Fi returns.
 
+## Chat apps (MCP server)
+
+The Edge Function `vocab-mcp` (`supabase/functions/vocab-mcp/`) is an MCP server. AI chat
+apps (Claude, ChatGPT, Gemini) use it to save Thai words from a conversation into
+`vocab_items`, on any device, including their Android apps.
+
+* **Address, one per chat app:**
+  `https://vazojhdllcilzbdtavww.supabase.co/functions/v1/vocab-mcp/<MCP_TOKEN>/<app>`,
+  where `<app>` is `claude`, `chatgpt` or `gemini`. The part `<app>` selects the context
+  label of new words (*Claude*, *ChatGPT*, *Gemini*). The server creates the label the first
+  time; you can rename or delete it in the phone or tablet app like any other label.
+* **Access:** the secret code `MCP_TOKEN` in the address (Supabase → Edge Functions →
+  Secrets). Anyone with the address can write words, so keep it private. To block an old
+  address, set a new value for `MCP_TOKEN` and update the connectors. `VOCAB_USER_ID` is the
+  user whose words the server writes. The function is deployed with `--no-verify-jwt`.
+* **Tools:**
+  * `add_vocab`: saves words (Thai script). The chat model must also send the romanization
+    (the full Paiboon+ rules are in the tool description), the English meaning, `word` or
+    `phrase`, and the part of speech. Such words are saved as they are, with
+    `enrichment_status = 'enriched'`. A word without romanization or English goes to the
+    `enrich` step of `process` instead; the chat's English is then kept in
+    `written_english`. Words with the same Thai text are skipped.
+  * `find_vocab`: searches all saved words (phone, tablet and chats).
+  * `update_vocab`, `delete_vocab`: correct or delete words saved from a chat
+    (`source = 'chat_mcp'`). Words from the phone or the tablet stay protected.
+* **Connect a chat app** (menu names can differ between app versions):
+  * **Claude:** claude.ai → **Settings → Connectors → Add custom connector**. Name:
+    `Thai vocab`, URL: the `claude` address. The connector is then also available in the
+    Android app. Switch it on in a chat with the tools button.
+  * **ChatGPT:** chatgpt.com → **Settings → Apps & Connectors** → **Advanced settings** →
+    switch on **Developer mode** → **Create**. URL: the `chatgpt` address, authentication:
+    **No authentication**. Custom connectors depend on the ChatGPT plan.
+  * **Gemini:** the Gemini CLI reads MCP servers from `~/.gemini/settings.json`:
+    `{"mcpServers": {"thai-vocab": {"httpUrl": "<the gemini address>"}}}`.
+* **In a chat:** for example, "Save the words from this conversation to my Thai vocab."
+
+The romanization rules and the word classes are in `supabase/functions/_shared/romanization.ts`,
+shared by `process` (enrich step) and `vocab-mcp` (tool description).
+
 ## The database, for other apps
 
 Table `vocab_items` (see `supabase/migrations/` for all columns). The numbers refer
@@ -183,7 +222,7 @@ to the hand-written specification (171.0 – 171.11).
 | `id` | 11 | input app | UUID, created on the phone |
 | `captured_at` | 1 | input app | date and time (UTC) |
 | `context`, `teacher` | 0 | recorder | `field` (default), `wondering`, `lingping_club`, or `lesson` with teacher `Boom` / `Ae` |
-| `source` | 140 | each input app | `field_recorder` (phone), `boox_handwriting` (tablet), later `lesson_recorder`, `pickup_thai`, … |
+| `source` | 140 | each input app | `field_recorder` (phone), `boox_handwriting` (tablet), `chat_mcp` (chat apps), later `lesson_recorder`, `pickup_thai`, … |
 | `thai`, `thai_alternatives` | 2 | recorder | Thai script from speech recognition, or typed |
 | `audio_path` | 7 | recorder | original recording in the Storage bucket `vocab-audio` (always kept) |
 | `image_path`, `english_image_path` | – | tablet | handwriting images of the upper and the lower zone, in the Storage bucket `vocab-handwriting` |

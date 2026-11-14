@@ -29,11 +29,9 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk";
 import { encodeBase64 } from "jsr:@std/encoding@1/base64";
+import { PARTS_OF_SPEECH, ROMANIZATION_RULES } from "../_shared/romanization.ts";
 
-const PARTS_OF_SPEECH = [
-  "noun", "verb", "adjective", "adverb", "preposition", "article",
-  "pronoun", "classifier", "particle", "conjunction", "number", "other",
-];
+
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -81,28 +79,7 @@ interface Enrichment {
 /** Temporary problem (rate limit, server error, timeout, network): retry at the next sync. */
 class TemporaryError extends Error {}
 
-const ROMANIZATION_RULES = `Paiboon+ romanization rules (follow exactly):
-Initial consonants:
-  ก g | ข ฃ ค ฅ ฆ k | ง ng | จ j | ฉ ช ฌ ch | ซ ศ ษ ส s | ญ ย y | ฎ ด d | ฏ ต dt
-  ฐ ฑ ฒ ถ ท ธ t | ณ น n | บ b | ป bp | ผ พ ภ p | ฝ ฟ f | ม m | ร r | ล ฬ l | ว w
-  ห ฮ h | อ (no letter). Clusters: กร gr, กล gl, กว gw, คร kr, คล kl, คว kw, ปร bpr,
-  ปล bpl, พร pr, พล pl, ตร dtr. Leading ห or อ (หน, หม, อย ...) only changes the tone.
-Final consonants:
-  k (ก ข ค ฆ) | ng (ง) | t (จ ช ซ ด ต ถ ท ธ ศ ษ ส ฎ ฏ ฐ ฑ ฒ) | n (น ณ ญ ร ล ฬ)
-  p (บ ป พ ฟ ภ) | m (ม) | final ว = o (แมว mɛɛo, เสียว sǐao) | final ย = i (ขาย kǎai).
-Vowels (short / long):
-  a / aa | i / ii | ʉ / ʉʉ (อึ / อือ) | u / uu | e / ee | ɛ / ɛɛ (แ) | o / oo
-  ɔ / ɔɔ (เอาะ / ออ) | ə / əə (เออ) | ia / iia (เอีย = ia) | ʉa (เอือ) | ua (อัว)
-  ai (ไ ใ อัย) | aai (อาย) | ao (เอา) | aao (อาว) | am (อำ) | ɔɔi (ออย) | ooi (โอย) | uai (อวย)
-  Silent letters (ุ in เหตุ, ิ in ญาติ, letters under ์) are not written.
-Tones (mark on the first vowel letter of the syllable):
-  mid: no mark (maa) | low: grave (màa) | falling: circumflex (mâa) | high: acute (máa)
-  rising: caron (mǎa). Use the real spoken tone of each syllable.
-Format: lowercase; syllables of one word joined with "-"; words separated by a space.
-Examples:
-  อุบัติเหตุ ù-bàt-dtì-hèet | ปลา bplaa | ตลาด dtà-làat | จั๊กจี้ ják-jîi | เสียว sǐao
-  ขอบคุณครับ kɔ̀ɔp-kun kráp | แม่น้ำ mɛ̂ɛ-náam | เธอ təə | มือถือ mʉʉ-tʉ̌ʉ | เด็ก dèk
-  สวัสดี sà-wàt-dii | กินข้าว gin kâao | ไม่เป็นไร mâi bpen rai`;
+
 
 
 const ENRICHMENT_SCHEMA = {
@@ -161,9 +138,13 @@ async function askClaude(content: any, schema: unknown): Promise<any> {
 }
 
 async function enrich(
-  thai: string, notes: string | null, handwriting: boolean, writtenEnglish: string | null,
+  thai: string, notes: string | null, source: string | null, writtenEnglish: string | null,
 ): Promise<Enrichment> {
-  const origin = handwriting
+  const origin = source === "chat_mcp"
+    ? `You help an English speaker who learns Thai. They discussed a Thai word or phrase in a
+chat with an AI assistant and saved it. The spelling is usually correct; correct it only
+when it is clearly wrong. The meaning given in the chat is a hint for the intended sense.`
+    : source === "boox_handwriting"
     ? `You help an English speaker who learns Thai. They wrote a Thai word or phrase by hand
 during a lesson, and a model read the handwriting. The text can contain a wrong letter where
 two Thai letters look alike in handwriting (for example ด and ค, ถ and ภ, บ and ป).`
@@ -176,7 +157,7 @@ writes a different word when a tone or vowel length was pronounced wrongly.`;
   const prompt = `${origin}
 
 Text: ${thai}
-${notes ? `The learner's note: ${notes}\n` : ""}${writtenEnglish ? `The learner's own translation: ${writtenEnglish}\n` : ""}
+${notes ? `The learner's note: ${notes}\n` : ""}${writtenEnglish ? `${source === "chat_mcp" ? "Meaning given in the chat" : "The learner's own translation"}: ${writtenEnglish}\n` : ""}
 Return:
 - thai: the standard Thai spelling of the most likely intended word or phrase. Keep the text
   unchanged when it is already correct or when you are not sure.
@@ -280,12 +261,17 @@ Deno.serve(async (req) => {
   if (!itemId) return json({ error: "item_id is missing" }, 400);
   if (!["transcribe", "read", "enrich", "all"].includes(step)) return json({ error: "Unknown step" }, 400);
 
-  // Acts as the signed-in user, so the security rules apply.
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: auth } } },
-  );
+  // Acts as the signed-in user, so the security rules apply. The only other caller is the
+  // "vocab-mcp" function of this project, which sends the service key (not a login token).
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  const bearer = auth.replace(/^Bearer\s+/i, "");
+  const supabase = serviceKey && bearer === serviceKey
+    ? createClient(Deno.env.get("SUPABASE_URL")!, serviceKey, { auth: { persistSession: false } })
+    : createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: auth } } },
+    );
 
   const { data: row, error: readError } = await supabase
     .from("vocab_items").select("*").eq("id", itemId).maybeSingle();
@@ -346,7 +332,7 @@ Deno.serve(async (req) => {
   const thai: string | null = update.thai ?? row.thai;
   if ((step === "enrich" || step === "all") && thai && row.enrichment_status !== "reviewed" && Deno.env.get("ANTHROPIC_API_KEY")) {
     try {
-      const r = await enrich(thai, row.notes, row.source === "boox_handwriting", row.written_english ?? null);
+      const r = await enrich(thai, row.notes, row.source ?? null, row.written_english ?? null);
       const corrected = r.thai.trim() || thai;
       const alternatives: string[] = [...(update.thai_alternatives ?? row.thai_alternatives ?? [])];
       if (corrected !== thai && !alternatives.includes(thai)) alternatives.unshift(thai);
