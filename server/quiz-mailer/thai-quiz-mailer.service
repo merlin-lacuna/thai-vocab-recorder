@@ -1,0 +1,15 @@
+[Unit]
+Description=Send the waiting Thai sentence quiz by email
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=thaiquiz
+Group=thaiquiz
+EnvironmentFile=/etc/thai-quiz/env
+ExecStart=/usr/bin/python3 /opt/thai-quiz/send_quiz.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
