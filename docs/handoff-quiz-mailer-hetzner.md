@@ -54,10 +54,12 @@ session). Ask the user for that file. Rules:
    - DKIM: check that the DNS record `google._domainkey.merlincarter.com` exists. If not,
      tell the user to switch on DKIM in the Google Admin console (Apps → Google Workspace
      → Gmail → Authenticate email) and add the record it shows.
-3. **Ask the user** for: the sender address (the Workspace address, or an alias such as
-   `quiz@merlincarter.com` if they want one), and the time of day and time zone for the
-   email. Recipient: the user's Gmail address (the same address that receives the
-   ThaiPod101 emails; ask the user if you do not know it).
+3. **Decided by the user:**
+   - Sender (`From` and SMTP login): the user's normal Workspace address on
+     `merlincarter.com` (ask the user for it if you do not know it). No alias.
+   - Send time: **07:00 Asia/Bangkok** every day (systemd: `OnCalendar=*-*-* 07:00:00 Asia/Bangkok`).
+   - Recipient: the user's Gmail address (the same address that receives the ThaiPod101
+     emails; ask the user if you do not know it).
 4. **Write the job** as a small Python 3 script with only the standard library
    (`urllib.request`, `smtplib`, `email.message`):
    - read the settings from the env file: `QUIZ_SEND_TOKEN`, `SMTP_HOST`, `SMTP_PORT`,
