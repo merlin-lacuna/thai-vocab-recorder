@@ -41,22 +41,23 @@ session). Ask the user for that file. Rules:
 ## Your task
 
 1. `git pull` on branch `claude/elegant-gates-odn9kz`.
-2. **Choose how the server sends mail.** Facts:
-   - Hetzner Cloud blocks outgoing ports 25 and 465 on new servers. Port 587 (SMTP with
-     STARTTLS) works. Do not set up a full mail server.
-   - Look up the MX, SPF (TXT) and DKIM records of `merlincarter.com`.
-   - If the domain already has a mail provider (Google Workspace, Fastmail, Proton,
-     IONOS ...), use that provider's SMTP server on port 587 with an account or app
-     password. The user types the password into the server file themselves; they must
-     not paste it in a chat.
-   - Otherwise use a transactional mail service with SMTP on port 587 (for example
-     Resend or Postmark; both have a free level). It needs DNS records (SPF, DKIM) for
-     the sender domain; give the user the exact records, or add them with the DNS tool
-     the user uses, after asking.
-   - Present the choice to the user with your recommendation before you set it up.
-3. **Ask the user** for: the sender address (suggestion: `quiz@merlincarter.com`), and the
-   time of day and time zone for the email. Recipient: the user's Gmail address (the
-   same address that receives the ThaiPod101 emails; ask the user if you do not know it).
+2. **Mail route (decided): the user's Google Workspace account on `merlincarter.com`.**
+   - Send through `smtp.gmail.com`, port 587, STARTTLS, logging in with the user's
+     Workspace address and a Google **app password** (needs 2-Step Verification on the
+     account). Hetzner Cloud blocks outgoing ports 25 and 465; port 587 works. Do not set
+     up a mail server.
+   - Give the user the exact steps to create the app password (myaccount.google.com →
+     Security → 2-Step Verification → App passwords). The user types it into the server
+     env file themselves; they must not paste it in a chat.
+   - The `From` address must be the Workspace account itself or an alias of it that is
+     set up in Gmail ("Send mail as"); Google rewrites other `From` addresses.
+   - DKIM: check that the DNS record `google._domainkey.merlincarter.com` exists. If not,
+     tell the user to switch on DKIM in the Google Admin console (Apps → Google Workspace
+     → Gmail → Authenticate email) and add the record it shows.
+3. **Ask the user** for: the sender address (the Workspace address, or an alias such as
+   `quiz@merlincarter.com` if they want one), and the time of day and time zone for the
+   email. Recipient: the user's Gmail address (the same address that receives the
+   ThaiPod101 emails; ask the user if you do not know it).
 4. **Write the job** as a small Python 3 script with only the standard library
    (`urllib.request`, `smtplib`, `email.message`):
    - read the settings from the env file: `QUIZ_SEND_TOKEN`, `SMTP_HOST`, `SMTP_PORT`,
