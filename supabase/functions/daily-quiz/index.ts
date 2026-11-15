@@ -3,6 +3,11 @@
 //   GET ?q=<quiz id>&c=<choice index>   -> JSON for the answer page; writes one quiz_events row
 //   GET ?q=<quiz id>&format=email       -> the email HTML (as text; Supabase sends HTML as text/plain)
 //
+// For the sending job on the user's server (header x-quiz-send-token = secret QUIZ_SEND_TOKEN):
+//   GET  ?action=next                   -> {"quiz": null} or the oldest unsent quiz:
+//                                          {"quiz": {id, subject, html, text}}
+//   POST ?action=sent&q=<quiz id>       -> marks the quiz as sent (sent_at = now)
+//
 // The answer page itself is a static page on the user's web server (web/quiz/), because Supabase
 // changes text/html to text/plain on its own domains. The quiz id is a random UUID; the
 // function returns only the data of that one quiz.
@@ -14,7 +19,7 @@ const PAGE_URL = Deno.env.get("QUIZ_PAGE_URL") ?? "";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type",
 };
 
@@ -36,11 +41,51 @@ function json(body: unknown, status = 200) {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const SEND_TOKEN = Deno.env.get("QUIZ_SEND_TOKEN") ?? "";
+
+function sameText(a: string, b: string) {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Requests from the sending job: get the next unsent quiz, or mark one as sent. */
+async function sender(req: Request, url: URL, action: string) {
+  if (!SEND_TOKEN || !sameText(req.headers.get("x-quiz-send-token") ?? "", SEND_TOKEN)) {
+    return json({ error: "not allowed" }, 403);
+  }
+  if (!PAGE_URL) return json({ error: "secret QUIZ_PAGE_URL is not set" }, 500);
+
+  if (action === "next" && req.method === "GET") {
+    const { data: quiz } = await db.from("email_quizzes").select("*")
+      .is("sent_at", null).order("created_at").limit(1).maybeSingle<Quiz>();
+    if (!quiz) return json({ quiz: null });
+    const d = new Date();
+    const date = `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`;
+    return json({
+      quiz: { id: quiz.id, subject: `Thai Sentence Quiz - ${date}`, html: emailHtml(quiz), text: emailText(quiz) },
+    });
+  }
+
+  if (action === "sent" && req.method === "POST") {
+    const q = url.searchParams.get("q") ?? "";
+    if (!UUID.test(q)) return json({ error: "quiz not found" }, 404);
+    const { data } = await db.from("email_quizzes").update({ sent_at: new Date().toISOString() })
+      .eq("id", q).select("id, sent_at").maybeSingle();
+    return data ? json(data) : json({ error: "quiz not found" }, 404);
+  }
+
+  return json({ error: "unknown action" }, 400);
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  const url = new URL(req.url);
+  const action = url.searchParams.get("action");
+  if (action) return sender(req, url, action);
   if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
 
-  const url = new URL(req.url);
   const q = url.searchParams.get("q") ?? "";
   if (!UUID.test(q)) return json({ error: "quiz not found" }, 404);
 
@@ -103,6 +148,15 @@ function highlighted(sentence: string, word: string) {
   return esc(sentence.slice(0, i)) +
     `<span style="background:#FFE27A;color:#0B2545;padding:0 6px;border-radius:6px;font-weight:bold;">` +
     esc(sentence.slice(i, i + word.length)) + `</span>` + esc(sentence.slice(i + word.length));
+}
+
+/** Plain-text version, for email programs that show no HTML. */
+function emailText(quiz: Quiz) {
+  const i = quiz.sentence_en.toLowerCase().indexOf(quiz.highlight.toLowerCase());
+  const sentence = i < 0 ? quiz.sentence_en
+    : quiz.sentence_en.slice(0, i) + quiz.highlight.toUpperCase() + quiz.sentence_en.slice(i + quiz.highlight.length);
+  return `Thai sentence quiz. Which sentence says: "${sentence}"\n\n` +
+    quiz.options.map((o, n) => `${n + 1}. ${o.thai}\n${PAGE_URL}?q=${quiz.id}&c=${n}`).join("\n") + "\n";
 }
 
 function emailHtml(quiz: Quiz) {
