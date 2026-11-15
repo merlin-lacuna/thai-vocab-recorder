@@ -419,3 +419,7 @@ enabled = true
 # chat apps send no Supabase login.
 [functions.vocab-mcp]
 verify_jwt = false
+
+# Quiz emails: the answer page calls this function without a Supabase login.
+[functions.daily-quiz]
+verify_jwt = false

@@ -1,0 +1,111 @@
+<!doctype html>
+<!-- Answer page for the quiz emails. Static file: it gets the quiz data from the Supabase
+     Edge Function "daily-quiz", which also records the answer. Address: ...?q=<quiz id>&c=<choice> -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Thai sentence quiz</title>
+<style>
+  :root { --blue:#0B3D91; --blue2:#2B6CB0; --ink:#1B1F24; --muted:#6B7280; --bg:#EEF2F7;
+          --card:#FFFFFF; --ok:#1E8E3E; --bad:#C5221F; --mark:#FFE27A; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family: Helvetica, Arial, "Noto Sans Thai", Tahoma, sans-serif; }
+  .wrap { max-width:560px; margin:0 auto; padding:16px; }
+  .card { background:var(--card); border-radius:18px; overflow:hidden; }
+  .head { color:#fff; text-align:center; padding:28px 20px 24px; background:var(--blue); }
+  .head.ok { background:var(--ok); } .head.bad { background:var(--bad); }
+  .head .th { font-size:34px; font-weight:bold; line-height:44px; }
+  .head .en { font-size:18px; opacity:.9; margin-top:4px; }
+  .body { padding:24px 20px; }
+  .word { text-align:center; padding-bottom:20px; border-bottom:1px solid #E5E7EB; }
+  .word .th { font-size:44px; font-weight:bold; line-height:58px; }
+  .word .rom { font-size:20px; color:#383838; margin-top:2px; }
+  .word .en { font-size:18px; margin-top:8px; }
+  .word .pos { color:var(--muted); }
+  .audio { margin-top:14px; font-size:16px; }
+  .audio a { display:inline-block; padding:10px 18px; border-radius:999px; background:var(--blue2);
+             color:#fff; text-decoration:none; font-weight:bold; }
+  .audio .none { color:var(--muted); font-style:italic; }
+  h2 { font-size:14px; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); margin:22px 0 10px; }
+  .sent { padding:12px 14px; border-radius:12px; background:#F6F8FB; margin-bottom:8px; }
+  .sent.right { background:#E7F5EC; border:1px solid #9AD3AE; }
+  .sent.wrong { background:#FDECEC; border:1px solid #F1A7A5; }
+  .sent .th { font-size:21px; line-height:30px; }
+  .sent .rom { font-size:15px; color:#383838; }
+  .sent .en { font-size:15px; color:var(--muted); }
+  mark { background:var(--mark); color:#0B2545; padding:0 5px; border-radius:5px; font-weight:bold; }
+  .choice { display:block; border:1px solid var(--blue2); border-radius:12px; background:#fff;
+            color:#1A4F8B; text-decoration:none; font-size:21px; line-height:30px; padding:11px 15px; margin-bottom:8px; }
+  .msg { text-align:center; padding:40px 20px; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap"><div class="card" id="app"><div class="msg">Loading…</div></div></div>
+<script>
+const API = "https://vazojhdllcilzbdtavww.supabase.co/functions/v1/daily-quiz";
+const app = document.getElementById("app");
+const params = new URLSearchParams(location.search);
+const q = params.get("q"), c = params.get("c");
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch]));
+function mark(sentence, word) {
+  const i = sentence.toLowerCase().indexOf(word.toLowerCase());
+  if (i < 0) return esc(sentence);
+  return esc(sentence.slice(0, i)) + "<mark>" + esc(sentence.slice(i, i + word.length)) + "</mark>" + esc(sentence.slice(i + word.length));
+}
+const sentence = (o, cls) =>
+  `<div class="sent ${cls || ""}"><div class="th">${esc(o.thai)}</div><div class="rom">${esc(o.romanization)}</div><div class="en">${esc(o.english)}</div></div>`;
+
+function render(d) {
+  const right = d.options.find(o => o.correct);
+  const chosen = d.options[d.choice];
+  const w = d.word;
+  const audio = d.native_audio_url
+    ? `<a href="${esc(d.native_audio_url)}" target="_blank">▶ Native recording</a>`
+    : `<span class="none">No native recording yet</span>`;
+  const wordBlock = `
+    <div class="word">
+      <div class="th">${esc(w.thai)}</div>
+      <div class="rom">${esc(w.romanization)}</div>
+      <div class="en">${esc(w.english)} ${w.part_of_speech ? `<span class="pos">(${esc(w.part_of_speech)})</span>` : ""}</div>
+      <div class="audio">${audio}</div>
+    </div>`;
+
+  if (d.correct) {
+    app.innerHTML = `
+      <div class="head ok"><div class="th">ถูกต้อง!</div><div class="en">Correct – well done.</div></div>
+      <div class="body">
+        ${wordBlock}
+        <h2>The sentence</h2>
+        <div class="sent right"><div class="th">${esc(right.thai)}</div><div class="rom">${esc(right.romanization)}</div>
+          <div class="en">${mark(d.sentence_en, d.highlight)}</div></div>
+        <h2>The other choices</h2>
+        ${d.options.filter(o => !o.correct).map(o => sentence(o)).join("")}
+      </div>`;
+  } else {
+    app.innerHTML = `
+      <div class="head bad"><div class="th">ยังไม่ถูก</div><div class="en">Not quite – try again.</div></div>
+      <div class="body">
+        <h2>You chose</h2>
+        ${sentence(chosen, "wrong")}
+        <h2>Find the sentence that says</h2>
+        <div class="sent"><div class="th" style="font-family:Helvetica,Arial,sans-serif">${mark(d.sentence_en, d.highlight)}</div></div>
+        ${d.options.map((o, i) => i === d.choice ? "" :
+          `<a class="choice" href="?q=${encodeURIComponent(q)}&c=${i}">${esc(o.thai)}</a>`).join("")}
+      </div>`;
+  }
+}
+
+if (!q || c === null) {
+  app.innerHTML = `<div class="msg">Open this page from a quiz email.</div>`;
+} else {
+  fetch(`${API}?q=${encodeURIComponent(q)}&c=${encodeURIComponent(c)}`)
+    .then(r => r.json().then(d => r.ok ? render(d) : Promise.reject(d.error)))
+    .catch(e => { app.innerHTML = `<div class="msg">Could not load the quiz: ${esc(e)}</div>`; });
+}
+</script>
+</body>
+</html>
