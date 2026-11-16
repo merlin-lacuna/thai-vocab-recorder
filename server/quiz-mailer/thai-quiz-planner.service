@@ -1,0 +1,19 @@
+[Unit]
+Description=Plan today's Thai quiz email (one-time timer for the send time from Supabase)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/thai-quiz/env
+# /run/thai-quiz/ holds the decision file between the two steps.
+RuntimeDirectory=thai-quiz
+# Step 1, as the user thaiquiz: ask Supabase for today's plan (network, send code).
+User=thaiquiz
+Group=thaiquiz
+ExecStart=/usr/bin/python3 /opt/thai-quiz/plan_quiz.py fetch /run/thai-quiz/plan.json
+# Step 2, as root (the "+" prefix): create the one-time timer. No network.
+ExecStartPost=+/usr/bin/python3 /opt/thai-quiz/plan_quiz.py apply /run/thai-quiz/plan.json
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true

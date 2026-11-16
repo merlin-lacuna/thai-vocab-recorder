@@ -1,0 +1,12 @@
+[Unit]
+Description=Plan the Thai quiz email shortly after midnight (Asia/Bangkok) and after a boot
+
+[Timer]
+OnCalendar=*-*-* 00:05:00 Asia/Bangkok
+# A run that was missed while the server was off runs at the next start.
+Persistent=true
+# A restart deletes the one-time timer; this run creates the timer of today again.
+OnBootSec=2min
+
+[Install]
+WantedBy=timers.target

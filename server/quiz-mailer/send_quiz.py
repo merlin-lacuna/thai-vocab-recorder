@@ -84,9 +84,12 @@ def send_email(settings, message):
 def run(env):
     """One run. Returns the log line."""
     settings = load_settings(env)
-    quiz = call_function(settings, "GET", {"action": "next"}).get("quiz")
+    answer = call_function(settings, "GET", {"action": "next"})
+    quiz = answer.get("quiz")
     if quiz is None:
-        return "nothing to send"
+        # The function gives a reason, for example "today's quiz was already sent".
+        reason = answer.get("reason")
+        return f"nothing to send ({reason})" if reason else "nothing to send"
     message = build_message(quiz, settings["MAIL_FROM"], settings["MAIL_TO"])
     send_email(settings, message)
     call_function(settings, "POST", {"action": "sent", "q": quiz["id"]})

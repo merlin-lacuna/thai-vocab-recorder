@@ -69,6 +69,13 @@ class RunTest(unittest.TestCase):
         send.assert_not_called()
         self.assertEqual(1, call.call_count)
 
+    def test_reason_from_the_function_is_in_the_log_line(self):
+        answer = {"quiz": None, "reason": "today's quiz was already sent"}
+        with mock.patch.object(send_quiz, "call_function", return_value=answer), \
+                mock.patch.object(send_quiz, "send_email") as send:
+            self.assertEqual("nothing to send (today's quiz was already sent)", send_quiz.run(ENV))
+        send.assert_not_called()
+
     def test_quiz_is_sent_and_then_marked_as_sent(self):
         with mock.patch.object(send_quiz, "call_function", side_effect=[{"quiz": QUIZ}, {"id": "quiz-1"}]) as call, \
                 mock.patch.object(send_quiz, "send_email") as send:
