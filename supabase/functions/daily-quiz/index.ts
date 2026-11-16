@@ -15,6 +15,9 @@
 //                                          (word choice below, sentences written by Claude).
 //                                          {"quiz": null, "reason": ...} when today's rule says send =
 //                                          false, or when no word fits the rule.
+//   GET  ?action=plan                   -> today's send time, for the planner run after midnight:
+//                                          {date: "YYYY-MM-DD", day_name, time_zone, send: bool,
+//                                           send_time: "HH:MM", already_sent: bool}
 //   POST ?action=sent&q=<quiz id>       -> marks the quiz as sent (sent_at = now)
 //
 // The answer page itself is a static page on the user's web server (web/quiz/), because Supabase
@@ -68,12 +71,27 @@ async function sender(req: Request, url: URL, action: string) {
   }
   if (!PAGE_URL) return json({ error: "secret QUIZ_PAGE_URL is not set" }, 500);
 
+  if (action === "plan" && req.method === "GET") {
+    // For the planner run shortly after midnight: today's send time.
+    const today = localDay();
+    const { data: rule } = await db.from("quiz_schedule").select("send, send_time")
+      .eq("user_id", USER_ID).eq("weekday", today.weekday).maybeSingle();
+    return json({
+      date: today.iso, day_name: today.name, time_zone: TIME_ZONE,
+      send: rule ? rule.send : true,
+      send_time: String(rule?.send_time ?? "07:00:00").slice(0, 5),
+      already_sent: await sentToday(today.iso),
+    });
+  }
+
   if (action === "next" && req.method === "GET") {
     // Today's rule from the table quiz_schedule (weekday in the user's time zone).
     const today = localDay();
     const { data: rule } = await db.from("quiz_schedule").select("send, label")
       .eq("user_id", USER_ID).eq("weekday", today.weekday).maybeSingle();
     if (rule && !rule.send) return json({ quiz: null, reason: `no quiz on ${today.name}` });
+    // At most one quiz email per day, also when the job runs twice (for example after a restart).
+    if (await sentToday(today.iso)) return json({ quiz: null, reason: "today's quiz was already sent" });
     // label: a label key (vocab_items.context) or a teacher name (vocab_items.teacher); null = any word.
     const label: string | null = rule?.label ?? null;
 
@@ -184,12 +202,24 @@ const TIME_ZONE = Deno.env.get("QUIZ_TIME_ZONE") ?? "Asia/Bangkok";
 const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 /** Today's weekday (1 = Monday) and date (MM/DD/YYYY) in the user's time zone. */
-function localDay() {
+function localDay(at = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE, weekday: "long", year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(new Date()).map((p) => [p.type, p.value]));
+  }).formatToParts(at).map((p) => [p.type, p.value]));
   const weekday = WEEKDAYS.indexOf(parts.weekday) + 1;
-  return { weekday, name: parts.weekday, date: `${parts.month}/${parts.day}/${parts.year}` };
+  return {
+    weekday, name: parts.weekday,
+    date: `${parts.month}/${parts.day}/${parts.year}`,   // for the email subject
+    iso: `${parts.year}-${parts.month}-${parts.day}`,    // for the server timer
+  };
+}
+
+/** True when a quiz email was already sent on this local date (YYYY-MM-DD). */
+async function sentToday(iso: string) {
+  const since = new Date(Date.now() - 36 * 3_600_000).toISOString();
+  const { data } = await db.from("email_quizzes").select("sent_at")
+    .eq("user_id", USER_ID).gte("sent_at", since);
+  return (data ?? []).some((r) => localDay(new Date(r.sent_at)).iso === iso);
 }
 
 const USER_ID = Deno.env.get("VOCAB_USER_ID") ?? "";
