@@ -40,6 +40,10 @@
   .choice { display:block; border:1px solid var(--blue2); border-radius:12px; background:#fff;
             color:#1A4F8B; text-decoration:none; font-size:21px; line-height:30px; padding:11px 15px; margin-bottom:8px; }
   .msg { text-align:center; padding:40px 20px; color:var(--muted); }
+  button.choice { width:100%; text-align:left; font-family:inherit; cursor:pointer; }
+  button.choice:disabled { opacity:.6; }
+  .timer { font-size:28px; font-weight:bold; margin-top:8px; font-variant-numeric:tabular-nums; }
+  .time { font-size:17px; margin-top:8px; opacity:.95; }
 </style>
 </head>
 <body>
@@ -59,10 +63,59 @@ function mark(sentence, word) {
 const sentence = (o, cls) =>
   `<div class="sent ${cls || ""}"><div class="th">${esc(o.thai)}</div><div class="rom">${esc(o.romanization)}</div><div class="en">${esc(o.english)}</div></div>`;
 
-function render(d) {
+// Timed mode (address ?q=<id>): the timer starts when the page shows the choices.
+// Old emails link straight to an answer (?q=<id>&c=<n>): untimed.
+let t0 = null, ticker = null;
+const elapsed = () => Math.round(performance.now() - t0);
+const secs = ms => (ms / 1000).toFixed(1) + " s";
+
+function startTimer() {
+  t0 = performance.now();
+  const el = document.getElementById("timer");
+  ticker = setInterval(() => { if (el) el.textContent = secs(elapsed()); }, 100);
+}
+
+function choiceButtons(options, skip) {
+  return options.map((o, i) => i === skip ? "" :
+    `<button class="choice" data-c="${i}">${esc(o.thai)}</button>`).join("");
+}
+function wireChoices() {
+  app.querySelectorAll("button.choice").forEach(b => b.onclick = () => answer(Number(b.dataset.c)));
+}
+
+function answer(choice) {
+  const ms = t0 === null ? null : elapsed();
+  app.querySelectorAll("button.choice").forEach(b => b.disabled = true);
+  const msPart = ms === null ? "" : `&ms=${ms}`;
+  // The timer pauses while the page waits for the server.
+  const waitStart = performance.now();
+  clearInterval(ticker);
+  fetch(`${API}?q=${encodeURIComponent(q)}&c=${choice}${msPart}`)
+    .then(r => r.json().then(d => {
+      if (t0 !== null) t0 += performance.now() - waitStart;
+      return r.ok ? render(d, ms) : Promise.reject(d.error);
+    }))
+    .catch(e => { app.innerHTML = `<div class="msg">Could not save the answer: ${esc(e)}</div>`; });
+}
+
+function showQuestion(d) {
+  app.innerHTML = `
+    <div class="head"><div class="en" style="font-size:15px;letter-spacing:1.5px;text-transform:uppercase">Which sentence says this?</div>
+      <div class="timer" id="timer">0.0 s</div></div>
+    <div class="body">
+      <div class="sent"><div class="th" style="font-family:Helvetica,Arial,sans-serif">${mark(d.sentence_en, d.highlight)}</div></div>
+      <div style="height:10px"></div>
+      ${choiceButtons(d.options, -1)}
+    </div>`;
+  wireChoices();
+  startTimer();
+}
+
+function render(d, ms) {
   const right = d.options.find(o => o.correct);
   const chosen = d.options[d.choice];
   const w = d.word;
+  const timeLine = ms == null ? "" : `<div class="time">${d.correct ? "Answered in" : "Time so far:"} ${secs(ms)}</div>`;
   const audio = d.native_audio_url
     ? `<a href="${esc(d.native_audio_url)}" target="_blank">▶ Native recording</a>`
     : `<span class="none">No native recording yet</span>`;
@@ -75,8 +128,9 @@ function render(d) {
     </div>`;
 
   if (d.correct) {
+    clearInterval(ticker);
     app.innerHTML = `
-      <div class="head ok"><div class="th">ถูกต้อง!</div><div class="en">Correct – well done.</div></div>
+      <div class="head ok"><div class="th">ถูกต้อง!</div><div class="en">Correct – well done.</div>${timeLine}</div>
       <div class="body">
         ${wordBlock}
         <h2>The sentence</h2>
@@ -86,24 +140,39 @@ function render(d) {
         ${d.options.filter(o => !o.correct).map(o => sentence(o)).join("")}
       </div>`;
   } else {
+    // Wrong answer: the timer keeps running in timed mode.
+    const others = ms == null
+      ? d.options.map((o, i) => i === d.choice ? "" :
+          `<a class="choice" href="?q=${encodeURIComponent(q)}&c=${i}">${esc(o.thai)}</a>`).join("")
+      : choiceButtons(d.options, d.choice);
     app.innerHTML = `
-      <div class="head bad"><div class="th">ยังไม่ถูก</div><div class="en">Not quite – try again.</div></div>
+      <div class="head bad"><div class="th">ยังไม่ถูก</div><div class="en">Not quite – try again.</div>
+        ${ms == null ? "" : `<div class="timer" id="timer">${secs(elapsed())}</div>`}</div>
       <div class="body">
         <h2>You chose</h2>
         ${sentence(chosen, "wrong")}
         <h2>Find the sentence that says</h2>
         <div class="sent"><div class="th" style="font-family:Helvetica,Arial,sans-serif">${mark(d.sentence_en, d.highlight)}</div></div>
-        ${d.options.map((o, i) => i === d.choice ? "" :
-          `<a class="choice" href="?q=${encodeURIComponent(q)}&c=${i}">${esc(o.thai)}</a>`).join("")}
+        ${others}
       </div>`;
+    if (ms != null) {
+      wireChoices();
+      const el = document.getElementById("timer");
+      clearInterval(ticker);
+      ticker = setInterval(() => { el.textContent = secs(elapsed()); }, 100);
+    }
   }
 }
 
-if (!q || c === null) {
+if (!q) {
   app.innerHTML = `<div class="msg">Open this page from a quiz email.</div>`;
+} else if (c === null) {
+  fetch(`${API}?q=${encodeURIComponent(q)}`)
+    .then(r => r.json().then(d => r.ok ? showQuestion(d) : Promise.reject(d.error)))
+    .catch(e => { app.innerHTML = `<div class="msg">Could not load the quiz: ${esc(e)}</div>`; });
 } else {
   fetch(`${API}?q=${encodeURIComponent(q)}&c=${encodeURIComponent(c)}`)
-    .then(r => r.json().then(d => r.ok ? render(d) : Promise.reject(d.error)))
+    .then(r => r.json().then(d => r.ok ? render(d, null) : Promise.reject(d.error)))
     .catch(e => { app.innerHTML = `<div class="msg">Could not load the quiz: ${esc(e)}</div>`; });
 }
 </script>

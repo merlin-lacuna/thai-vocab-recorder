@@ -1,0 +1,48 @@
+# Copies the folder web/ (the quiz page) to the user's Hetzner web server over SSH.
+# Runs when a push changes web/, or by hand (Actions -> Deploy web pages -> Run workflow).
+#
+# Repository secrets (set once, see docs/handoff-quiz-timer-deploy.md):
+#   DEPLOY_HOST         server name or IP address
+#   DEPLOY_USER         SSH user that may write to DEPLOY_PATH (and nothing else)
+#   DEPLOY_PATH         folder on the server that contains quiz/, e.g. /srv/www/new.merlincarter.com
+#   DEPLOY_SSH_KEY      private key (ed25519) for DEPLOY_USER, only used by this workflow
+#   DEPLOY_KNOWN_HOSTS  output of: ssh-keyscan -t ed25519 <DEPLOY_HOST>
+
+name: Deploy web pages
+
+on:
+  push:
+    branches: [claude/elegant-gates-odn9kz]
+    paths: ["web/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy web/ to the server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then echo "Deploy secrets are not set yet; skipping."; exit 0; fi
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # tar over SSH: needs only tar on the server. Files that exist only on the server stay.
+          tar -C web -cf - . | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "tar -C '$DEPLOY_PATH' --no-same-owner -xf -"
+
+      - name: Check the live page
+        run: |
+          curl -fsS -o /dev/null -w "quiz page: %{http_code}\n" https://new.merlincarter.com/quiz/
