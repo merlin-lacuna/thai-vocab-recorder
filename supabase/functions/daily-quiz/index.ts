@@ -9,10 +9,12 @@
 //   GET ?q=<quiz id>&format=email       -> the email HTML (as text; Supabase sends HTML as text/plain)
 //
 // For the sending job on the user's server (header x-quiz-send-token = secret QUIZ_SEND_TOKEN):
-//   GET  ?action=next                   -> the oldest unsent quiz: {"quiz": {id, subject, html, text}}.
+//   GET  ?action=next                   -> today's quiz: {"quiz": {id, subject, html, text}}, following
+//                                          the rule for today's weekday in the table quiz_schedule.
 //                                          When no quiz is waiting, the function first creates one
 //                                          (word choice below, sentences written by Claude).
-//                                          {"quiz": null} only when no word can be quizzed.
+//                                          {"quiz": null, "reason": ...} when today's rule says send =
+//                                          false, or when no word fits the rule.
 //   POST ?action=sent&q=<quiz id>       -> marks the quiz as sent (sent_at = now)
 //
 // The answer page itself is a static page on the user's web server (web/quiz/), because Supabase
@@ -67,18 +69,27 @@ async function sender(req: Request, url: URL, action: string) {
   if (!PAGE_URL) return json({ error: "secret QUIZ_PAGE_URL is not set" }, 500);
 
   if (action === "next" && req.method === "GET") {
-    let { data: quiz } = await db.from("email_quizzes").select("*")
-      .is("sent_at", null).order("created_at").limit(1).maybeSingle<Quiz>();
+    // Today's rule from the table quiz_schedule (weekday in the user's time zone).
+    const today = localDay();
+    const { data: rule } = await db.from("quiz_schedule").select("send, teacher")
+      .eq("user_id", USER_ID).eq("weekday", today.weekday).maybeSingle();
+    if (rule && !rule.send) return json({ quiz: null, reason: `no quiz on ${today.name}` });
+    const teacher: string | null = rule?.teacher ?? null;
+
+    // A waiting quiz (for example after a failed send) is used only if it fits today's rule.
+    const { data: waiting } = await db.from("email_quizzes").select("*, vocab_items(teacher)")
+      .is("sent_at", null).order("created_at");
+    let quiz: Quiz | null = ((waiting ?? []) as (Quiz & { vocab_items: { teacher: string | null } | null })[])
+      .find((w) => !teacher || w.vocab_items?.teacher === teacher) ?? null;
     if (!quiz) {
       try {
-        quiz = await createQuiz();
+        quiz = await createQuiz(teacher);
       } catch (e) {
         return json({ error: `could not create a quiz: ${(e as Error).message}` }, 500);
       }
     }
-    if (!quiz) return json({ quiz: null });
-    const d = new Date();
-    const date = `${String(d.getUTCMonth() + 1).padStart(2, "0")}/${String(d.getUTCDate()).padStart(2, "0")}/${d.getUTCFullYear()}`;
+    if (!quiz) return json({ quiz: null, reason: teacher ? `no words from teacher ${teacher}` : "no words" });
+    const date = today.date;
     return json({
       quiz: { id: quiz.id, subject: `Thai Sentence Quiz - ${date}`, html: emailHtml(quiz), text: emailText(quiz) },
     });
@@ -167,6 +178,18 @@ Deno.serve(async (req) => {
 // ---------------------------------------------------------------------------------------
 // Quiz creation
 
+const TIME_ZONE = Deno.env.get("QUIZ_TIME_ZONE") ?? "Asia/Bangkok";
+const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+/** Today's weekday (1 = Monday) and date (MM/DD/YYYY) in the user's time zone. */
+function localDay() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE, weekday: "long", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date()).map((p) => [p.type, p.value]));
+  const weekday = WEEKDAYS.indexOf(parts.weekday) + 1;
+  return { weekday, name: parts.weekday, date: `${parts.month}/${parts.day}/${parts.year}` };
+}
+
 const USER_ID = Deno.env.get("VOCAB_USER_ID") ?? "";
 const RECENT_DAYS = 7; // a word gets at most one email quiz in this many days
 
@@ -182,11 +205,13 @@ type Word = {
  *   3. all other words (word with the oldest last quiz first).
  * Words that had an email quiz in the last RECENT_DAYS days are skipped.
  */
-async function chooseWord(): Promise<Word | null> {
-  const { data: words, error } = await db.from("vocab_items")
+async function chooseWord(teacher: string | null): Promise<Word | null> {
+  let query = db.from("vocab_items")
     .select("id, thai, romanization, english, part_of_speech, entry_type, created_at")
     .eq("user_id", USER_ID).is("deleted_at", null).is("duplicate_of", null)
     .not("thai", "is", null).not("english", "is", null).not("romanization", "is", null);
+  if (teacher) query = query.eq("teacher", teacher);
+  const { data: words, error } = await query;
   if (error) throw new Error(error.message);
 
   const { data: events } = await db.from("quiz_events")
@@ -210,7 +235,9 @@ async function chooseWord(): Promise<Word | null> {
     if (l.correct === false) return [0, -Date.parse(l.at)];      // wrong: most recent first
     return [2, Date.parse(l.at)];                                // others: oldest quiz first
   };
-  const candidates = ((words ?? []) as Word[]).filter((w) => !skip.has(w.id));
+  // If every word was quizzed recently (small teacher lists), use all words again.
+  let candidates = ((words ?? []) as Word[]).filter((w) => !skip.has(w.id));
+  if (candidates.length === 0) candidates = (words ?? []) as Word[];
   candidates.sort((a, b) => {
     const [ga, ta] = rank(a), [gb, tb] = rank(b);
     return ga - gb || ta - tb;
@@ -330,9 +357,9 @@ function check(w: Word, q: Written) {
   }
 }
 
-async function createQuiz(): Promise<Quiz | null> {
+async function createQuiz(teacher: string | null): Promise<Quiz | null> {
   if (!USER_ID) throw new Error("secret VOCAB_USER_ID is not set");
-  const word = await chooseWord();
+  const word = await chooseWord(teacher);
   if (!word) return null;
 
   let written: Written | null = null;
