@@ -79,6 +79,17 @@ scp send_quiz.py hetzner:/opt/thai-quiz/send_quiz.py
 Each run writes one log line: `sent quiz <id> ...`, `nothing to send`, or `error: ...`.
 After an error the service has the state "failed" until the next successful run.
 
+## Quiz page on the same server
+
+The quiz page is deployed by .github/workflows/deploy-web.yml.
+
+| Item | Value |
+|---|---|
+| Address | `https://new.merlincarter.com/quiz/` |
+| Folder on the server | `/var/www/thai-vocab/` (the workflow copies `web/` into it). `/var/www/quiz` is a link to `thai-vocab/quiz`, which the Caddy web server serves. |
+| SSH user | `deploy`: owns only `/var/www/thai-vocab/`, without sudo rights. Its key runs one fixed command (`tar -C /var/www/thai-vocab --no-same-owner -xf -`) and nothing else. |
+| Secrets | Five repository secrets `DEPLOY_*` in GitHub. GitHub holds the only copy of the private key. |
+
 ## Tests
 
 ```bash

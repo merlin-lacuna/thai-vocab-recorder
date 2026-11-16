@@ -57,5 +57,4 @@ Supabase cannot host the page itself: on its free addresses it changes `text/htm
 
 ## Updating the page later
 
-When `web/quiz/index.html` changes in the repository, copy the new file to the same place
-on the server. Write the exact copy command into your report, so the user can run it later.
+The quiz page is deployed by .github/workflows/deploy-web.yml.
