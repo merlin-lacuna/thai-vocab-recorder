@@ -71,24 +71,26 @@ async function sender(req: Request, url: URL, action: string) {
   if (action === "next" && req.method === "GET") {
     // Today's rule from the table quiz_schedule (weekday in the user's time zone).
     const today = localDay();
-    const { data: rule } = await db.from("quiz_schedule").select("send, teacher")
+    const { data: rule } = await db.from("quiz_schedule").select("send, label")
       .eq("user_id", USER_ID).eq("weekday", today.weekday).maybeSingle();
     if (rule && !rule.send) return json({ quiz: null, reason: `no quiz on ${today.name}` });
-    const teacher: string | null = rule?.teacher ?? null;
+    // label: a label key (vocab_items.context) or a teacher name (vocab_items.teacher); null = any word.
+    const label: string | null = rule?.label ?? null;
 
     // A waiting quiz (for example after a failed send) is used only if it fits today's rule.
-    const { data: waiting } = await db.from("email_quizzes").select("*, vocab_items(teacher)")
+    const { data: waiting } = await db.from("email_quizzes").select("*, vocab_items(context, teacher)")
       .is("sent_at", null).order("created_at");
-    let quiz: Quiz | null = ((waiting ?? []) as (Quiz & { vocab_items: { teacher: string | null } | null })[])
-      .find((w) => !teacher || w.vocab_items?.teacher === teacher) ?? null;
+    type Waiting = Quiz & { vocab_items: { context: string | null; teacher: string | null } | null };
+    let quiz: Quiz | null = ((waiting ?? []) as Waiting[])
+      .find((w) => !label || w.vocab_items?.context === label || w.vocab_items?.teacher === label) ?? null;
     if (!quiz) {
       try {
-        quiz = await createQuiz(teacher);
+        quiz = await createQuiz(label);
       } catch (e) {
         return json({ error: `could not create a quiz: ${(e as Error).message}` }, 500);
       }
     }
-    if (!quiz) return json({ quiz: null, reason: teacher ? `no words from teacher ${teacher}` : "no words" });
+    if (!quiz) return json({ quiz: null, reason: label ? `no words for label ${label}` : "no words" });
     const date = today.date;
     return json({
       quiz: { id: quiz.id, subject: `Thai Sentence Quiz - ${date}`, html: emailHtml(quiz), text: emailText(quiz) },
@@ -205,12 +207,15 @@ type Word = {
  *   3. all other words (word with the oldest last quiz first).
  * Words that had an email quiz in the last RECENT_DAYS days are skipped.
  */
-async function chooseWord(teacher: string | null): Promise<Word | null> {
+async function chooseWord(label: string | null): Promise<Word | null> {
   let query = db.from("vocab_items")
     .select("id, thai, romanization, english, part_of_speech, entry_type, created_at")
     .eq("user_id", USER_ID).is("deleted_at", null).is("duplicate_of", null)
     .not("thai", "is", null).not("english", "is", null).not("romanization", "is", null);
-  if (teacher) query = query.eq("teacher", teacher);
+  if (label) {
+    const v = label.replace(/"/g, "");
+    query = query.or(`context.eq."${v}",teacher.eq."${v}"`);
+  }
   const { data: words, error } = await query;
   if (error) throw new Error(error.message);
 
@@ -235,7 +240,7 @@ async function chooseWord(teacher: string | null): Promise<Word | null> {
     if (l.correct === false) return [0, -Date.parse(l.at)];      // wrong: most recent first
     return [2, Date.parse(l.at)];                                // others: oldest quiz first
   };
-  // If every word was quizzed recently (small teacher lists), use all words again.
+  // If every word was quizzed recently (small label lists), use all words again.
   let candidates = ((words ?? []) as Word[]).filter((w) => !skip.has(w.id));
   if (candidates.length === 0) candidates = (words ?? []) as Word[];
   candidates.sort((a, b) => {
@@ -357,9 +362,9 @@ function check(w: Word, q: Written) {
   }
 }
 
-async function createQuiz(teacher: string | null): Promise<Quiz | null> {
+async function createQuiz(label: string | null): Promise<Quiz | null> {
   if (!USER_ID) throw new Error("secret VOCAB_USER_ID is not set");
-  const word = await chooseWord(teacher);
+  const word = await chooseWord(label);
   if (!word) return null;
 
   let written: Written | null = null;
