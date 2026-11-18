@@ -34,4 +34,41 @@ class InkTest {
         assertEquals(1f, scaleFor(width = 800f, maxWidth = 1000), 0.0001f)
         assertEquals(0.5f, scaleFor(width = 2000f, maxWidth = 1000), 0.0001f)
     }
+
+    /** A horizontal line with one point per pixel from x = 0 to x = 100, at height [y]. */
+    private fun line(y: Float) = Stroke((0..100).map { InkPoint(it.toFloat(), y) })
+
+    @Test fun `the eraser cuts a stroke into two pieces`() {
+        val pieces = erase(listOf(line(50f)), listOf(InkPoint(50f, 50f)), radius = 5f)
+        assertEquals(2, pieces.size)
+        assertEquals(InkPoint(44f, 50f), pieces[0].points.last())
+        assertEquals(InkPoint(56f, 50f), pieces[1].points.first())
+    }
+
+    @Test fun `the eraser keeps the strokes that it does not touch`() {
+        val far = line(90f)
+        val result = erase(listOf(line(10f), far), (0..100 step 4).map { InkPoint(it.toFloat(), 12f) }, radius = 5f)
+        assertEquals(listOf(far), result)
+    }
+
+    @Test fun `the eraser removes a small mark and keeps the stroke under it`() {
+        val mark = stroke(48f, 20f, 52f, 22f) // for example a tone mark
+        val letter = line(50f)
+        assertEquals(listOf(letter), erase(listOf(mark, letter), listOf(InkPoint(50f, 21f)), radius = 5f))
+    }
+
+    @Test fun `the eraser removes a dot`() {
+        assertEquals(emptyList<Stroke>(), erase(listOf(stroke(20f, 20f)), listOf(InkPoint(22f, 21f)), radius = 5f))
+    }
+
+    @Test fun `a faulty sample far from the path erases no ink between`() {
+        // The jump from (0, 0) to (300, 300) is larger than ERASER_MAX_JUMP: no line joins them.
+        val diagonal = Stroke((100..200).map { InkPoint(it.toFloat(), it.toFloat()) })
+        assertEquals(listOf(diagonal), erase(listOf(diagonal), listOf(InkPoint(0f, 0f), InkPoint(300f, 300f)), radius = 5f))
+    }
+
+    @Test fun `an eraser path without points removes no ink`() {
+        val one = line(50f)
+        assertEquals(listOf(one), erase(listOf(one), emptyList()))
+    }
 }

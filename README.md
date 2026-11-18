@@ -144,7 +144,7 @@ with `source = 'boox_handwriting'`, and it shows the words from the phone in its
  │ ├────────────────────────────────────────┤ │
  │ │ ENGLISH, OPTIONAL                      │ │  ← your own translation, if you want
  │ └────────────────────────────────────────┘ │
- │ [Clear] [⌨] [Next: Phonetic] [Next: ไทย]   │
+ │ [Clear] [Eraser] [⌨] [Next: Phonetic] [Next: ไทย] │
  └────────────────────────────────────────────┘
 ```
 
@@ -155,6 +155,10 @@ with `source = 'boox_handwriting'`, and it shows the words from the phone in its
   **Next: ไทย** when you wrote Thai script, or **Next: Phonetic** when you wrote the sound
   in Latin letters. The app saves the handwriting as PNG images, clears the box at once,
   and shows the new row at the top of the list. The app does not ask any question.
+* **Erase:** turn the stylus around and move its eraser end over the ink. For a stylus
+  without an eraser end, press **Eraser** (the button turns black), move the pen over the
+  ink, and press **Eraser** again to write. A grey trail shows where the eraser was. When
+  the pen is lifted, the app removes the ink under the trail; the rest of a stroke stays.
 * **Two zones:** a stroke belongs to the zone where it starts, so a long tail of a Thai
   letter may cross the line. The lower zone can stay empty.
 * **Reading:** the sync job uploads the images to the Storage bucket `vocab-handwriting`

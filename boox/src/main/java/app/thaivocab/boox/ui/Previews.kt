@@ -40,7 +40,7 @@ fun PreviewBoox() {
             onContextChange = {}, onEditLabels = {}, onLabelMenu = {},
             updateBuild = null, updateProgress = null, onUpdateClick = {},
             onSyncBarClick = {}, onEntryClick = {}, thaiInk = true,
-            onClear = {}, onType = {}, onNext = {},
+            onClear = {}, eraserOn = false, onEraser = {}, onType = {}, onNext = {},
             pad = { Box(Modifier.fillMaxSize().background(Paper)) },
         )
     }

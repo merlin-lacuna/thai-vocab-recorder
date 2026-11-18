@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -93,6 +94,7 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
 
     var inkView by remember { mutableStateOf<InkView?>(null) }
     var thaiInk by remember { mutableStateOf(false) }
+    var eraserOn by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
@@ -122,6 +124,8 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
         onEntryClick = { editing = it },
         thaiInk = thaiInk,
         onClear = { inkView?.clear() },
+        eraserOn = eraserOn,
+        onEraser = { inkView?.let { it.setEraser(!it.eraserOn) } },
         onType = { typing = true },
         onNext = { phonetic ->
             inkView?.let { view ->
@@ -133,7 +137,7 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
         },
         pad = {
             AndroidView(
-                factory = { ctx -> InkView(ctx) { thaiInk = it }.also { inkView = it } },
+                factory = { ctx -> InkView(ctx, onInkChanged = { thaiInk = it }, onEraserChanged = { eraserOn = it }).also { inkView = it } },
                 modifier = Modifier.fillMaxSize(),
             )
         },
@@ -197,6 +201,8 @@ fun BooxContent(
     onEntryClick: (VocabEntry) -> Unit,
     thaiInk: Boolean,
     onClear: () -> Unit,
+    eraserOn: Boolean,
+    onEraser: () -> Unit,
     onType: () -> Unit,
     onNext: (phonetic: Boolean) -> Unit,
     pad: @Composable () -> Unit,
@@ -248,6 +254,14 @@ fun BooxContent(
                 val shape = RoundedCornerShape(6.dp)
                 OutlinedButton(onClick = onClear, shape = shape, border = BorderStroke(2.dp, Ink), modifier = Modifier.height(60.dp)) {
                     Text("Clear", fontSize = 20.sp)
+                }
+                // Black while the eraser is on: the pen then removes strokes and draws no ink.
+                OutlinedButton(
+                    onClick = onEraser, shape = shape, border = BorderStroke(2.dp, Ink), modifier = Modifier.height(60.dp),
+                    colors = if (eraserOn) ButtonDefaults.outlinedButtonColors(containerColor = Ink, contentColor = Paper)
+                    else ButtonDefaults.outlinedButtonColors(),
+                ) {
+                    Text("Eraser", fontSize = 20.sp)
                 }
                 OutlinedButton(onClick = onType, shape = shape, border = BorderStroke(2.dp, Ink), modifier = Modifier.height(60.dp)) {
                     Icon(Icons.Filled.Keyboard, contentDescription = "Type a word", Modifier.size(28.dp))
