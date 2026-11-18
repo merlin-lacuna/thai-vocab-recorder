@@ -23,8 +23,12 @@
 //   ANTHROPIC_API_KEY      required for "read" and "enrich" ("enrich" is skipped without it)
 // Optional:
 //   ELEVENLABS_STT_MODEL   default "scribe_v1"
-//   CLAUDE_MODEL           default "claude-sonnet-5-5"
+//   CLAUDE_MODEL           default "claude-sonnet-5-5" (step "enrich")
 //   CLAUDE_EFFORT          default "low" (short dictionary-style answer, fast)
+//   READ_MODEL             default "claude-opus-5-5" (step "read": handwriting)
+//   READ_EFFORT            default "medium"
+//   (Handwriting test, 16 lesson words: Sonnet low 12/16, Sonnet high 15/16, Opus medium 15/16,
+//   Opus medium with the "most likely real word" prompt 16/16.)
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk";
@@ -98,20 +102,26 @@ const ENRICHMENT_SCHEMA = {
 let anthropic: Anthropic | null = null;
 
 // deno-lint-ignore no-explicit-any
-async function askClaude(content: any, schema: unknown): Promise<any> {
-  // Reads ANTHROPIC_API_KEY from the environment. One retry inside the SDK, then the
-  // next sync tries again; 30 s limit so the device (60 s limit) always gets an answer.
-  anthropic ??= new Anthropic({ timeout: 30_000, maxRetries: 1 });
+async function askClaude(
+  // deno-lint-ignore no-explicit-any
+  content: any, schema: unknown,
+  model = Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-5-5",
+  effort = Deno.env.get("CLAUDE_EFFORT") ?? "low",
+  // deno-lint-ignore no-explicit-any
+): Promise<any> {
+  // Reads ANTHROPIC_API_KEY from the environment. No retry inside the SDK; the
+  // next sync tries again. 45 s limit so the device (60 s limit) always gets an answer.
+  anthropic ??= new Anthropic({ timeout: 45_000, maxRetries: 0 });
   let response;
   try {
     response = await anthropic.beta.messages.create({
-      model: Deno.env.get("CLAUDE_MODEL") ?? "claude-sonnet-5-5",
+      model,
       max_tokens: 4000,
       // If a safety classifier declines, the API re-runs the request on a fallback model.
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: {
-        effort: (Deno.env.get("CLAUDE_EFFORT") ?? "low") as "low" | "medium" | "high" | "xhigh" | "max",
+        effort: effort as "low" | "medium" | "high" | "xhigh" | "max",
         // deno-lint-ignore no-explicit-any
         format: { type: "json_schema", schema: schema as any },
       },
@@ -222,12 +232,14 @@ Return:
 - thai: the Thai script of the most likely intended word or phrase.
 - thai_alternatives: up to four other Thai words or phrases that this spelling can mean,
   most likely first. Use an empty list when there is only one plausible answer.`
-    : `Image 1 contains handwritten Thai script by a learner. Letter shapes can be imperfect.
+    : `Image 1 contains handwritten Thai script by a learner. Letter shapes can be imperfect, and
+similar letters are easy to confuse (for example ร/ว, ด/ต, บ/น, ค/ด, ข/ช).
 Return:
-- written_text: the Thai text exactly as you read it.
-- thai: the same text as written_text.
-- thai_alternatives: up to four other readings where a letter or a tone mark is unclear,
-  most likely first. Use an empty list when the handwriting is clear.`;
+- written_text: the Thai text exactly as you read it, letter by letter.
+- thai: the real Thai word or phrase that the learner most likely wrote. If written_text is
+  not a real Thai word, choose the real word whose letters look most like the handwriting.
+  The words come from a Thai lesson, so ordinary vocabulary is more likely than rare words.
+- thai_alternatives: up to four other real words that the handwriting can be, most likely first.`;
   content.push({
     type: "text",
     text: `You help an English speaker who learns Thai. They wrote the text in the image by hand
@@ -239,7 +251,10 @@ ${task}
       : "null."}
 ${row.notes ? `\nThe learner's note: ${row.notes}` : ""}`,
   });
-  const result = await askClaude(content, READING_SCHEMA) as Reading;
+  const result = await askClaude(
+    content, READING_SCHEMA,
+    Deno.env.get("READ_MODEL") ?? "claude-opus-5-5", Deno.env.get("READ_EFFORT") ?? "medium",
+  ) as Reading;
   if (!row.english_image_path) result.written_english = null;
   return result;
 }
