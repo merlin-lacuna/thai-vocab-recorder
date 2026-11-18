@@ -19,6 +19,8 @@
 //                                          {date: "YYYY-MM-DD", day_name, time_zone, send: bool,
 //                                           send_time: "HH:MM", already_sent: bool}
 //   POST ?action=sent&q=<quiz id>       -> marks the quiz as sent (sent_at = now)
+//   POST ?action=create&item=<word id>  -> creates a quiz for this word: {"id": ...}; the quiz waits
+//                                          until it is sent
 //
 // The answer page itself is a static page on the user's web server (web/quiz/), because Supabase
 // changes text/html to text/plain on its own domains. The quiz id is a random UUID; the
@@ -70,6 +72,19 @@ async function sender(req: Request, url: URL, action: string) {
     return json({ error: "not allowed" }, 403);
   }
   if (!PAGE_URL) return json({ error: "secret QUIZ_PAGE_URL is not set" }, 500);
+
+  if (action === "create" && req.method === "POST") {
+    // An extra quiz for one given word (for example right after a lesson). The quiz waits
+    // in email_quizzes until it is sent.
+    const item = url.searchParams.get("item") ?? "";
+    if (!UUID.test(item)) return json({ error: "word not found" }, 404);
+    try {
+      const quiz = await createQuiz(null, item);
+      return quiz ? json({ id: quiz.id }) : json({ error: "word not found" }, 404);
+    } catch (e) {
+      return json({ error: `could not create a quiz: ${(e as Error).message}` }, 500);
+    }
+  }
 
   if (action === "plan" && req.method === "GET") {
     // For the planner run shortly after midnight: today's send time.
@@ -237,11 +252,15 @@ type Word = {
  *   3. all other words (word with the oldest last quiz first).
  * Words that had an email quiz in the last RECENT_DAYS days are skipped.
  */
-async function chooseWord(label: string | null): Promise<Word | null> {
+async function chooseWord(label: string | null, itemId?: string): Promise<Word | null> {
   let query = db.from("vocab_items")
     .select("id, thai, romanization, english, part_of_speech, entry_type, created_at")
     .eq("user_id", USER_ID).is("deleted_at", null).is("duplicate_of", null)
     .not("thai", "is", null).not("english", "is", null).not("romanization", "is", null);
+  if (itemId) {
+    const { data } = await query.eq("id", itemId).maybeSingle();
+    return (data as Word | null) ?? null;
+  }
   if (label) {
     const v = label.replace(/"/g, "");
     query = query.or(`context.eq."${v}",teacher.eq."${v}"`);
@@ -392,9 +411,9 @@ function check(w: Word, q: Written) {
   }
 }
 
-async function createQuiz(label: string | null): Promise<Quiz | null> {
+async function createQuiz(label: string | null, itemId?: string): Promise<Quiz | null> {
   if (!USER_ID) throw new Error("secret VOCAB_USER_ID is not set");
-  const word = await chooseWord(label);
+  const word = await chooseWord(label, itemId);
   if (!word) return null;
 
   let written: Written | null = null;
