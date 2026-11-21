@@ -20,6 +20,7 @@ interface QuizActions {
     fun clearLabels()
     fun startRound(firstId: String? = null)
     fun nextQuestion()
+    fun finish()
     fun home()
     fun choose(choice: Int)
     fun playNative(url: String)

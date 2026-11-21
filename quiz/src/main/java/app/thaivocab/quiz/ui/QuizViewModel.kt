@@ -104,7 +104,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app), QuizActions {
 
     override fun clearLabels() { _selected.value = emptySet(); api.selectedLabels = emptyList(); next = null }
 
-    /** Starts a round of [ROUND] questions. [firstId]: a quiz from a notification. */
+    /** Starts a new series of questions. [firstId]: a quiz from a notification. */
     override fun startRound(firstId: String?) {
         roundIds.clear(); results.clear(); next = null
         showQuestion(1, firstId)
@@ -112,8 +112,14 @@ class QuizViewModel(app: Application) : AndroidViewModel(app), QuizActions {
 
     override fun nextQuestion() {
         val n = (screen.value as? Screen.Solved)?.number ?: return
-        if (n >= ROUND) { _screen.value = Screen.Summary(results.toList()); return }
         showQuestion(n + 1, null)
+    }
+
+    /** Ends the series and shows the summary of the answered questions. */
+    override fun finish() {
+        stopAudio()
+        next = null
+        _screen.value = if (results.isEmpty()) Screen.Home else Screen.Summary(results.toList())
     }
 
     override fun home() { stopAudio(); _screen.value = Screen.Home }
@@ -132,7 +138,7 @@ class QuizViewModel(app: Application) : AndroidViewModel(app), QuizActions {
                 startedAt = SystemClock.elapsedRealtime()
                 _screen.value = Screen.Asking(number, q, emptyMap(), checking = false)
                 // Fetch the next question while the user answers this one.
-                if (number < ROUND) next = fetchAsync()
+                next = fetchAsync()
             } catch (e: Exception) {
                 next = null
                 handle(e)
@@ -212,5 +218,4 @@ class QuizViewModel(app: Application) : AndroidViewModel(app), QuizActions {
 
     override fun onCleared() { stopAudio() }
 
-    companion object { const val ROUND = 5 }
 }

@@ -130,9 +130,9 @@ private fun HomeView(vm: QuizActions) {
         }
     }
     Button(onClick = { vm.startRound() }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-        Text("Start ${QuizViewModel.ROUND} questions ⏱", fontSize = 18.sp)
+        Text("Start ⏱", fontSize = 18.sp)
     }
-    Text("The timer starts when each question opens.", style = MaterialTheme.typography.bodySmall)
+    Text("One question at a time. The timer starts when each question opens.", style = MaterialTheme.typography.bodySmall)
 
     if (!pushReady) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
@@ -149,10 +149,10 @@ private fun HomeView(vm: QuizActions) {
 
 @Composable
 private fun LoadingView(number: Int) {
-    Text("Question $number of ${QuizViewModel.ROUND}", style = MaterialTheme.typography.titleMedium)
+    Text("Question $number", style = MaterialTheme.typography.titleMedium)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         CircularProgressIndicator()
-        Text("Preparing the question… The first one can take up to a minute.")
+        Text("Preparing the question… The first one can take up to 30 seconds.")
     }
 }
 
@@ -183,7 +183,7 @@ private fun AskingView(vm: QuizActions, s: Screen.Asking) {
         while (!s.checking) { ms = vm.elapsedMs(); delay(100) }
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("Question ${s.number} of ${QuizViewModel.ROUND}", style = MaterialTheme.typography.titleMedium)
+        Text("Question ${s.number}", style = MaterialTheme.typography.titleMedium)
         Text(String.format(Locale.US, "%.1f s", ms / 1000.0), style = MaterialTheme.typography.titleMedium)
     }
     Sentence(s.question)
@@ -202,6 +202,7 @@ private fun AskingView(vm: QuizActions, s: Screen.Asking) {
             }
         }
     }
+    TextButton(onClick = vm::finish) { Text("Finish") }
 }
 
 @Composable
@@ -230,9 +231,9 @@ private fun SolvedView(vm: QuizActions, s: Screen.Solved) {
         Text(o.romanization, style = MaterialTheme.typography.bodyMedium)
     }
     Button(onClick = vm::nextQuestion, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-        Text(if (s.number < QuizViewModel.ROUND) "Next question (${s.number + 1} of ${QuizViewModel.ROUND})" else "See results",
-            fontSize = 18.sp)
+        Text("Next question", fontSize = 18.sp)
     }
+    OutlinedButton(onClick = vm::finish, modifier = Modifier.fillMaxWidth()) { Text("Finish") }
     HorizontalDivider()
     Text("The other sentences", style = MaterialTheme.typography.titleMedium)
     a.options.filter { !it.correct }.forEach { o ->
@@ -242,13 +243,12 @@ private fun SolvedView(vm: QuizActions, s: Screen.Solved) {
             Text(o.english, style = MaterialTheme.typography.bodySmall)
         }
     }
-    TextButton(onClick = vm::home) { Text("Stop the round") }
 }
 
 @Composable
 private fun SummaryView(vm: QuizActions, s: Screen.Summary) {
     val first = s.results.count { it.tries == 1 }
-    Text("Round finished", style = MaterialTheme.typography.headlineMedium)
+    Text("Finished", style = MaterialTheme.typography.headlineMedium)
     Text("$first of ${s.results.size} right on the first try", fontSize = 18.sp)
     s.results.forEach { r ->
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -263,7 +263,7 @@ private fun SummaryView(vm: QuizActions, s: Screen.Summary) {
         }
     }
     Button(onClick = { vm.startRound() }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-        Text("${QuizViewModel.ROUND} more", fontSize = 18.sp)
+        Text("Start again ⏱", fontSize = 18.sp)
     }
     TextButton(onClick = vm::home) { Text("Done") }
 }

@@ -41,6 +41,7 @@ class ScreenshotTest {
         override fun clearLabels() {}
         override fun startRound(firstId: String?) {}
         override fun nextQuestion() {}
+        override fun finish() {}
         override fun home() {}
         override fun choose(choice: Int) {}
         override fun playNative(url: String) {}
