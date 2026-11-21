@@ -21,6 +21,21 @@
 //   POST ?action=sent&q=<quiz id>       -> marks the quiz as sent (sent_at = now)
 //   POST ?action=create&item=<word id>  -> creates a quiz for this word: {"id": ...}; the quiz waits
 //                                          until it is sent
+//   After ?action=sent, the function sends a push message {"type":"quiz","id":...} to every
+//   UnifiedPush address in the table push_endpoints (the quiz app shows a notification).
+//
+// For the quiz app (header Authorization: Bearer <user's login token>):
+//   GET    ?action=practice[&labels=a,b][&exclude=id,id]
+//                                       -> a practice quiz: {id, sentence_en, highlight, options: [{thai}]}.
+//                                          labels: label keys or teacher names; empty = any word.
+//                                          exclude: ids of the quizzes already asked in this round.
+//                                          The function keeps one prepared quiz per label filter, so the
+//                                          answer is usually immediate; it prepares the next one after
+//                                          each request.
+//   POST   ?action=push  body {"endpoint": url}  -> saves the app's UnifiedPush address
+//   DELETE ?action=push  body {"endpoint": url}  -> removes it
+//   The answer request (?q=&c=&ms=) is the same as for the web page, plus &src=app
+//   (quiz_events.quiz_type = 'app_sentence_timed').
 //
 // The answer page itself is a static page on the user's web server (web/quiz/), because Supabase
 // changes text/html to text/plain on its own domains. The quiz id is a random UUID; the
@@ -79,7 +94,7 @@ async function sender(req: Request, url: URL, action: string) {
     const item = url.searchParams.get("item") ?? "";
     if (!UUID.test(item)) return json({ error: "word not found" }, 404);
     try {
-      const quiz = await createQuiz(null, item);
+      const quiz = await createQuiz(null, { itemId: item });
       return quiz ? json({ id: quiz.id }) : json({ error: "word not found" }, 404);
     } catch (e) {
       return json({ error: `could not create a quiz: ${(e as Error).message}` }, 500);
@@ -112,13 +127,13 @@ async function sender(req: Request, url: URL, action: string) {
 
     // A waiting quiz (for example after a failed send) is used only if it fits today's rule.
     const { data: waiting } = await db.from("email_quizzes").select("*, vocab_items(context, teacher)")
-      .is("sent_at", null).order("created_at");
+      .eq("source", "email").is("sent_at", null).order("created_at");
     type Waiting = Quiz & { vocab_items: { context: string | null; teacher: string | null } | null };
     let quiz: Quiz | null = ((waiting ?? []) as Waiting[])
       .find((w) => !label || w.vocab_items?.context === label || w.vocab_items?.teacher === label) ?? null;
     if (!quiz) {
       try {
-        quiz = await createQuiz(label);
+        quiz = await createQuiz(label ? [label] : null);
       } catch (e) {
         return json({ error: `could not create a quiz: ${(e as Error).message}` }, 500);
       }
@@ -135,7 +150,9 @@ async function sender(req: Request, url: URL, action: string) {
     if (!UUID.test(q)) return json({ error: "quiz not found" }, 404);
     const { data } = await db.from("email_quizzes").update({ sent_at: new Date().toISOString() })
       .eq("id", q).select("id, sent_at").maybeSingle();
-    return data ? json(data) : json({ error: "quiz not found" }, 404);
+    if (!data) return json({ error: "quiz not found" }, 404);
+    const pushed = await pushAll({ type: "quiz", id: data.id });
+    return json({ ...data, pushed });
   }
 
   return json({ error: "unknown action" }, 400);
@@ -145,6 +162,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   const url = new URL(req.url);
   const action = url.searchParams.get("action");
+  if (action === "practice" || action === "push") return app(req, url, action);
   if (action) return sender(req, url, action);
   if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
 
@@ -181,11 +199,13 @@ Deno.serve(async (req) => {
   const now = Date.now();
 
   // One row per click, so wrong tries count too.
+  const fromApp = url.searchParams.get("src") === "app";
   await db.from("quiz_events").insert({
     user_id: quiz.user_id, item_id: quiz.item_id,
     asked_at: timed ? new Date(now - ms).toISOString() : quiz.created_at,
     answered_at: new Date(now).toISOString(), correct: chosen.correct,
-    quiz_type: timed ? "email_sentence_timed" : "email_sentence", answer: chosen.thai,
+    quiz_type: fromApp ? "app_sentence_timed" : timed ? "email_sentence_timed" : "email_sentence",
+    answer: chosen.thai,
   });
 
   let nativeAudioUrl: string | null = null;
@@ -252,7 +272,7 @@ type Word = {
  *   3. all other words (word with the oldest last quiz first).
  * Words that had an email quiz in the last RECENT_DAYS days are skipped.
  */
-async function chooseWord(label: string | null, itemId?: string): Promise<Word | null> {
+async function chooseWord(labels: string[] | null, itemId?: string, exclude: string[] = []): Promise<Word | null> {
   let query = db.from("vocab_items")
     .select("id, thai, romanization, english, part_of_speech, entry_type, created_at")
     .eq("user_id", USER_ID).is("deleted_at", null).is("duplicate_of", null)
@@ -261,9 +281,10 @@ async function chooseWord(label: string | null, itemId?: string): Promise<Word |
     const { data } = await query.eq("id", itemId).maybeSingle();
     return (data as Word | null) ?? null;
   }
-  if (label) {
-    const v = label.replace(/"/g, "");
-    query = query.or(`context.eq."${v}",teacher.eq."${v}"`);
+  if (labels && labels.length > 0) {
+    // A label is a label key (vocab_items.context) or a teacher name (vocab_items.teacher).
+    query = query.or(labels.map((l) => l.replace(/[",()]/g, ""))
+      .flatMap((v) => [`context.eq."${v}"`, `teacher.eq."${v}"`]).join(","));
   }
   const { data: words, error } = await query;
   if (error) throw new Error(error.message);
@@ -274,6 +295,7 @@ async function chooseWord(label: string | null, itemId?: string): Promise<Word |
   const { data: recent } = await db.from("email_quizzes")
     .select("item_id").eq("user_id", USER_ID).gte("created_at", since);
   const skip = new Set((recent ?? []).map((r) => r.item_id));
+  const excluded = new Set(exclude);
 
   // Most recent answer per word.
   const last = new Map<string, { at: string; correct: boolean | null }>();
@@ -290,8 +312,9 @@ async function chooseWord(label: string | null, itemId?: string): Promise<Word |
     return [2, Date.parse(l.at)];                                // others: oldest quiz first
   };
   // If every word was quizzed recently (small label lists), use all words again.
-  let candidates = ((words ?? []) as Word[]).filter((w) => !skip.has(w.id));
-  if (candidates.length === 0) candidates = (words ?? []) as Word[];
+  const allowed = ((words ?? []) as Word[]).filter((w) => !excluded.has(w.id));
+  let candidates = allowed.filter((w) => !skip.has(w.id));
+  if (candidates.length === 0) candidates = allowed;
   candidates.sort((a, b) => {
     const [ga, ta] = rank(a), [gb, tb] = rank(b);
     return ga - gb || ta - tb;
@@ -411,9 +434,14 @@ function check(w: Word, q: Written) {
   }
 }
 
-async function createQuiz(label: string | null, itemId?: string): Promise<Quiz | null> {
+type CreateOptions = {
+  itemId?: string; exclude?: string[];
+  source?: "email" | "app"; labelsKey?: string | null; shown?: boolean;
+};
+
+async function createQuiz(labels: string[] | null, opts: CreateOptions = {}): Promise<Quiz | null> {
   if (!USER_ID) throw new Error("secret VOCAB_USER_ID is not set");
-  const word = await chooseWord(label, itemId);
+  const word = await chooseWord(labels, opts.itemId, opts.exclude);
   if (!word) return null;
 
   let written: Written | null = null;
@@ -441,9 +469,112 @@ async function createQuiz(label: string | null, itemId?: string): Promise<Quiz |
   const { data, error } = await db.from("email_quizzes").insert({
     user_id: USER_ID, item_id: word.id,
     sentence_en: written.sentence_en, highlight: written.highlight, options,
+    source: opts.source ?? "email", labels: opts.labelsKey ?? null,
+    shown_at: opts.shown ? new Date().toISOString() : null,
   }).select("*").single<Quiz>();
   if (error) throw new Error(error.message);
   return data;
+}
+
+// ---------------------------------------------------------------------------------------
+// Quiz app
+
+/** The logged-in user of the quiz app, from the Authorization header; null if invalid. */
+async function appUser(req: Request): Promise<string | null> {
+  const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  const { data } = await db.auth.getUser(token);
+  return data.user?.id ?? null;
+}
+
+function labelList(url: URL): string[] {
+  return [...new Set((url.searchParams.get("labels") ?? "").split(",").map((s) => s.trim()).filter(Boolean))].sort();
+}
+
+/** Creates the prepared quiz for this label filter, unless one is already waiting. */
+async function prepare(labels: string[], exclude: string[]) {
+  const key = labels.length ? labels.join(",") : null;
+  let q = db.from("email_quizzes").select("id").eq("source", "app").is("shown_at", null);
+  q = key ? q.eq("labels", key) : q.is("labels", null);
+  const { data } = await q.limit(1);
+  if (data && data.length > 0) return;
+  await createQuiz(labels.length ? labels : null, { exclude, source: "app", labelsKey: key });
+}
+
+async function app(req: Request, url: URL, action: string) {
+  const user = await appUser(req);
+  if (!user || user !== USER_ID) return json({ error: "not logged in" }, 401);
+
+  if (action === "push" && (req.method === "POST" || req.method === "DELETE")) {
+    const body = await req.json().catch(() => ({}));
+    const endpoint = String(body.endpoint ?? "");
+    if (!/^https:\/\/\S+$/.test(endpoint)) return json({ error: "bad endpoint" }, 400);
+    if (req.method === "POST") {
+      await db.from("push_endpoints").upsert({ user_id: user, endpoint, updated_at: new Date().toISOString() });
+    } else {
+      await db.from("push_endpoints").delete().eq("user_id", user).eq("endpoint", endpoint);
+    }
+    return json({ ok: true });
+  }
+
+  if (action === "practice" && req.method === "GET") {
+    const labels = labelList(url);
+    const key = labels.length ? labels.join(",") : null;
+    // exclude: ids of the quizzes already asked in this round; the function skips their words.
+    const shownIds = (url.searchParams.get("exclude") ?? "").split(",").filter((s) => UUID.test(s)).slice(0, 50);
+    const { data: shown } = shownIds.length
+      ? await db.from("email_quizzes").select("item_id").in("id", shownIds)
+      : { data: [] };
+    const exclude = (shown ?? []).map((r) => r.item_id as string);
+
+    // A prepared quiz for the same filter, if its word is not already in this round.
+    let q = db.from("email_quizzes").select("*").eq("source", "app").is("shown_at", null);
+    q = key ? q.eq("labels", key) : q.is("labels", null);
+    const { data: prepared } = await q.order("created_at");
+    let quiz: Quiz | null = ((prepared ?? []) as Quiz[]).find((p) => !exclude.includes(p.item_id)) ?? null;
+    if (quiz) {
+      await db.from("email_quizzes").update({ shown_at: new Date().toISOString() }).eq("id", quiz.id);
+    } else {
+      try {
+        quiz = await createQuiz(labels.length ? labels : null, { exclude, source: "app", labelsKey: key, shown: true });
+      } catch (e) {
+        return json({ error: `could not create a quiz: ${(e as Error).message}` }, 500);
+      }
+    }
+    if (!quiz) return json({ error: labels.length ? "no words with these labels" : "no words" }, 404);
+
+    // Prepare the next quiz after the response is sent.
+    const next = prepare(labels, [...exclude, quiz.item_id]).catch((e) => console.error("prepare:", e.message));
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).EdgeRuntime?.waitUntil(next);
+
+    return json({
+      id: quiz.id, sentence_en: quiz.sentence_en, highlight: quiz.highlight,
+      options: quiz.options.map((o) => ({ thai: o.thai })),
+    });
+  }
+
+  return json({ error: "unknown action" }, 400);
+}
+
+/** Sends a UnifiedPush message to every saved address; removes addresses that are gone. */
+async function pushAll(message: unknown): Promise<number> {
+  const { data } = await db.from("push_endpoints").select("endpoint").eq("user_id", USER_ID);
+  let sent = 0;
+  for (const { endpoint } of data ?? []) {
+    try {
+      const r = await fetch(endpoint, {
+        method: "POST", body: JSON.stringify(message),
+        headers: { "Content-Type": "application/json", "TTL": "86400" },
+      });
+      if (r.status === 404 || r.status === 410) {
+        await db.from("push_endpoints").delete().eq("endpoint", endpoint);
+      } else if (r.ok) sent++;
+    } catch (e) {
+      console.error("push:", (e as Error).message);
+    }
+  }
+  return sent;
 }
 
 // ---------------------------------------------------------------------------------------

@@ -15,4 +15,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "ThaiVocabRecorder"
-include(":app", ":core", ":boox")
+include(":app", ":core", ":boox", ":quiz")

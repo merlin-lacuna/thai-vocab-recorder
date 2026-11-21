@@ -12,3 +12,4 @@ supabase/.branches/
 # Local secrets written by `elevenlabs onboard`
 /.env.local
 boox/src/test/snapshots/
+quiz/src/test/snapshots/
