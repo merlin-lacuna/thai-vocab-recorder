@@ -6,6 +6,20 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -74,8 +88,9 @@ import java.util.Date
 import java.util.Locale
 
 /** Part of the screen height that the writing box takes. */
-private const val PAD_HEIGHT = 0.39f
+private const val PAD_HEIGHT = 0.195f
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BooxScreen(vm: BooxViewModel = viewModel()) {
     val entries by vm.entries.collectAsStateWithLifecycle()
@@ -96,6 +111,11 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
     var thaiInk by remember { mutableStateOf(false) }
     var eraserOn by remember { mutableStateOf(false) }
 
+    // Search box and label filter of the list. Both are forgotten when the app closes.
+    var query by rememberSaveable { mutableStateOf("") }
+    var labelFilter by rememberSaveable { mutableStateOf<String?>(null) }
+    val keyboardOpen = WindowInsets.isImeVisible
+
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
         vm.syncNow() // also downloads changes made on the phone or in the Supabase dashboard
@@ -105,11 +125,17 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
 
     // While a window covers the writing box, the pen library must not draw: the ink would
     // appear on top of the window.
-    val windowOpen = editing != null || typing || showSetup || showLabels || labelMenu != null
+    // The same holds for the keyboard of the search box, which covers the writing box.
+    val windowOpen = editing != null || typing || showSetup || showLabels || labelMenu != null || keyboardOpen
     LaunchedEffect(windowOpen, inkView) { inkView?.setActive(!windowOpen) }
 
     BooxContent(
         entries = entries,
+        query = query,
+        onQueryChange = { query = it },
+        labelFilter = labelFilter,
+        onLabelFilter = { labelFilter = it },
+        keyboardOpen = keyboardOpen,
         connected = supabase.connected,
         syncError = supabase.lastError,
         captureContext = captureContext,
@@ -132,7 +158,13 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
                 val saved = vm.saveInk(
                     view.snapshot(), view.width.toFloat(), view.height.toFloat(), view.strokeWidth, phonetic,
                 )
-                if (saved) view.clear()
+                if (saved) {
+                    view.clear()
+                    // The new entry must be visible: remove a search text or label filter
+                    // that would hide it.
+                    query = ""
+                    if (labelFilter != captureContext.id) labelFilter = null
+                }
             }
         },
         pad = {
@@ -187,6 +219,11 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
 @Composable
 fun BooxContent(
     entries: List<VocabEntry>,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    labelFilter: String?,
+    onLabelFilter: (String?) -> Unit,
+    keyboardOpen: Boolean,
     connected: Boolean,
     syncError: String?,
     captureContext: CaptureContext,
@@ -217,17 +254,31 @@ fun BooxContent(
         Column(Modifier.fillMaxSize()) {
             if (updateBuild != null) UpdateBanner(updateBuild, updateProgress, onUpdateClick)
             SyncBar(connected, entries.count { it.dirty }, syncError, onSyncBarClick)
+            val labels = remember(entries) { usedLabels(entries) }
+            // A filter for a label that no entry has any more would show an empty list
+            // without a selected chip, so it counts as "All".
+            val activeLabel = labelFilter?.takeIf { id -> labels.any { it.id == id } }
+            val shown = remember(entries, query, activeLabel) { filterEntries(entries, query, activeLabel) }
+            SearchBox(query, onQueryChange, keyboardOpen)
+            LabelFilterRow(labels, activeLabel, onLabelFilter)
             HorizontalDivider(color = Ink, thickness = 2.dp)
 
             // A new entry is inserted at the top. Without this scroll, the list keeps its old
-            // position and the new row stays above the visible area.
+            // position and the new row stays above the visible area. A new search text or
+            // label also starts at the top.
             val listState = rememberLazyListState()
-            val newestId = entries.firstOrNull()?.id
-            LaunchedEffect(newestId) { listState.scrollToItem(0) }
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
-                items(entries, key = { it.id }) { entry ->
-                    EntryRow(entry, onClick = { onEntryClick(entry) })
-                    HorizontalDivider(color = Grey, thickness = 1.dp)
+            val newestId = shown.firstOrNull()?.id
+            LaunchedEffect(newestId, query, activeLabel) { listState.scrollToItem(0) }
+            if (shown.isEmpty() && entries.isNotEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("No word matches the search.", fontSize = 20.sp, fontStyle = FontStyle.Italic, color = Grey)
+                }
+            } else {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState) {
+                    items(shown, key = { it.id }) { entry ->
+                        EntryRow(entry, onClick = { onEntryClick(entry) })
+                        HorizontalDivider(color = Grey, thickness = 1.dp)
+                    }
                 }
             }
 
@@ -273,6 +324,78 @@ fun BooxContent(
                     Text("Next: ไทย", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
+        }
+    }
+}
+
+/** The search box above the list. The list changes with each typed letter. */
+@Composable
+private fun SearchBox(query: String, onQueryChange: (String) -> Unit, keyboardOpen: Boolean) {
+    val focus = LocalFocusManager.current
+    // When the keyboard closes (Back button or the Search key), the box gives up the focus,
+    // so the cursor stops and the next tap on the box opens the keyboard again.
+    LaunchedEffect(keyboardOpen) { if (!keyboardOpen) focus.clearFocus() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, bottom = 6.dp)
+            .border(2.dp, Ink, RoundedCornerShape(6.dp))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Search, contentDescription = null, tint = Ink)
+        Spacer(Modifier.width(10.dp))
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            textStyle = TextStyle(fontSize = 20.sp, color = Ink),
+            cursorBrush = SolidColor(Ink),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focus.clearFocus() }),
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+            decorationBox = { field ->
+                if (query.isEmpty()) Text("Search: Thai, sound or English", fontSize = 20.sp, color = Grey)
+                field()
+            },
+        )
+        if (query.isNotEmpty()) {
+            Icon(
+                Icons.Filled.Close, contentDescription = "Clear the search",
+                tint = Ink,
+                modifier = Modifier.clickable { onQueryChange(""); focus.clearFocus() }.padding(8.dp).size(28.dp),
+            )
+        }
+    }
+}
+
+/**
+ * One chip for each label that an entry has, and "All". One tap on a chip shows the entries
+ * of that label only. A tap on the selected chip, or on "All", shows every entry again.
+ */
+@Composable
+private fun LabelFilterRow(labels: List<CaptureContext>, selectedId: String?, onSelect: (String?) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FilterChip(
+            selected = selectedId == null,
+            onClick = { onSelect(null) },
+            label = { Text("All", fontSize = 17.sp) },
+            border = BorderStroke(1.5.dp, Ink),
+        )
+        labels.forEach { c ->
+            FilterChip(
+                selected = c.id == selectedId,
+                onClick = { onSelect(if (c.id == selectedId) null else c.id) },
+                label = { Text(c.label, fontSize = 17.sp) },
+                leadingIcon = if (c.isLesson) {
+                    { Icon(Icons.Filled.School, contentDescription = null, Modifier.size(FilterChipDefaults.IconSize)) }
+                } else null,
+                border = BorderStroke(1.5.dp, Ink),
+            )
         }
     }
 }

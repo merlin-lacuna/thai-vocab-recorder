@@ -134,6 +134,8 @@ with `source = 'boox_handwriting'`, and it shows the words from the phone in its
 ```
  ┌────────────────────────────────────────────┐
  │ ☁ All saved to database                    │  ← tap to connect the database
+ │ [🔍 Search: Thai, sound or English       ] │  ← filters the list while you type
+ │ [All] Lingping 🎓Boom 🎓Ae Field work …     │  ← one tap: only the words of that label
  ├────────────────────────────────────────────┤
  │ [handwriting]  มด                           │  ← tap a row to correct or delete it
  │                mót · ant                   │
@@ -155,6 +157,12 @@ with `source = 'boox_handwriting'`, and it shows the words from the phone in its
   **Next: ไทย** when you wrote Thai script, or **Next: Phonetic** when you wrote the sound
   in Latin letters. The app saves the handwriting as PNG images, clears the box at once,
   and shows the new row at the top of the list. The app does not ask any question.
+* **Search and filter:** the search box looks at the Thai text, the romanization (accents
+  are optional: `mai` finds `mâi`), the English meaning, the notes and the text that you
+  wrote. The row under it has one chip for each label that a word in the list has. A tap
+  on a chip shows the words of that label only; a tap on **All** shows every word. The
+  list is always sorted by time, newest first. After **Next**, the app removes a search
+  text or filter that would hide the new word.
 * **Erase:** turn the stylus around and move its eraser end over the ink. For a stylus
   without an eraser end, press **Eraser** (the button turns black), move the pen over the
   ink, and press **Eraser** again to write. A grey trail shows where the eraser was. When

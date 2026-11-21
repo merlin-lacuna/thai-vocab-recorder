@@ -36,6 +36,7 @@ fun PreviewBoox() {
     EinkTheme {
         BooxContent(
             entries = sampleEntries, connected = true, syncError = null,
+            query = "", onQueryChange = {}, labelFilter = null, onLabelFilter = {}, keyboardOpen = false,
             captureContext = CaptureContext.KRU_BOOM, contextOptions = CaptureContext.BUILT_IN,
             onContextChange = {}, onEditLabels = {}, onLabelMenu = {},
             updateBuild = null, updateProgress = null, onUpdateClick = {},
