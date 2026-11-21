@@ -1,0 +1,15 @@
+# ntfy server configuration for ntfy.merlincarter.com (push messages for the quiz app).
+# On the server: /root/ntfy/server.yml, mounted read-only at /etc/ntfy/server.yml.
+# Secrets are not in this file. Users and access rules live in /root/ntfy/lib/user.db.
+
+base-url: "https://ntfy.merlincarter.com"
+listen-http: ":80"
+
+# Caddy terminates HTTPS and passes the client address in X-Forwarded-For.
+behind-proxy: true
+
+cache-file: "/var/cache/ntfy/cache.db"
+cache-duration: "12h"
+
+auth-file: "/var/lib/ntfy/user.db"
+auth-default-access: "deny-all"

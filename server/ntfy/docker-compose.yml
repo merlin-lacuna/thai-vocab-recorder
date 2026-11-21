@@ -1,0 +1,22 @@
+# ntfy push server. On the server: /root/ntfy/docker-compose.yml.
+# The container has no public port. Caddy (container nagare-caddy, /root/nagare/Caddyfile)
+# reaches it as ntfy:80 on the shared Docker network nagare_default.
+
+services:
+  ntfy:
+    image: binwiederhier/ntfy:v2.38.1
+    container_name: ntfy
+    command: serve
+    environment:
+      TZ: Asia/Bangkok
+    volumes:
+      - ./server.yml:/etc/ntfy/server.yml:ro
+      - ./cache:/var/cache/ntfy
+      - ./lib:/var/lib/ntfy
+    restart: unless-stopped
+    networks:
+      - nagare_default
+
+networks:
+  nagare_default:
+    external: true
