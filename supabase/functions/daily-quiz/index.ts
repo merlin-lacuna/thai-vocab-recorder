@@ -21,6 +21,7 @@
 //   POST ?action=sent&q=<quiz id>       -> marks the quiz as sent (sent_at = now)
 //   POST ?action=create&item=<word id>  -> creates a quiz for this word: {"id": ...}; the quiz waits
 //                                          until it is sent
+//   POST ?action=notify&q=<quiz id>    -> sends only the push message for this quiz (for tests)
 //   After ?action=sent, the function sends a push message {"type":"quiz","id":...} to every
 //   UnifiedPush address in the table push_endpoints (the quiz app shows a notification).
 //
@@ -143,6 +144,13 @@ async function sender(req: Request, url: URL, action: string) {
     return json({
       quiz: { id: quiz.id, subject: `Thai Sentence Quiz - ${date}`, html: emailHtml(quiz), text: emailText(quiz) },
     });
+  }
+
+  if (action === "notify" && req.method === "POST") {
+    // Sends only the push message for a quiz (for tests); the quiz stays unsent.
+    const q = url.searchParams.get("q") ?? "";
+    if (!UUID.test(q)) return json({ error: "quiz not found" }, 404);
+    return json({ pushed: await pushAll({ type: "quiz", id: q }) });
   }
 
   if (action === "sent" && req.method === "POST") {
