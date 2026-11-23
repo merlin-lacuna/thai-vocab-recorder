@@ -438,7 +438,10 @@ function check(w: Word, q: Written) {
   if (new Set(all).size !== all.length) throw new Error("two sentences are the same");
   if (q.distractors.some((d) => d.thai.includes(w.thai))) throw new Error("a distractor contains the word");
   for (const s of [q.correct, ...q.distractors]) {
-    if (s.words.map((x) => x.thai).join("") !== s.thai) throw new Error(`word split does not match: ${s.thai}`);
+    // Spaces are ignored: Thai uses them between phrases (for example after ๆ), and the
+    // word list leaves them out.
+    const joined = s.words.map((x) => x.thai).join("").replace(/\s+/g, "");
+    if (joined !== s.thai.replace(/\s+/g, "")) throw new Error(`word split does not match: ${s.thai}`);
   }
 }
 
