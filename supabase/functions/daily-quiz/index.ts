@@ -386,18 +386,20 @@ Write:
 2. highlight: the English word or words in sentence_en that translate the Thai word. Copy
    them exactly as they appear in sentence_en.
 3. correct: the natural Thai translation of sentence_en. It must contain ${w.thai} exactly as
-   written. Use everyday spoken Thai with ฉัน for "I", and leave out ของฉัน where Thai
-   speakers would leave it out.
+   written. Use everyday spoken Thai. The learner is a man: use ผม for "I" and "me"
+   (never ฉัน), and ครับ (never ค่ะ or คะ) when a sentence has a polite particle. Leave out
+   ของผม where Thai speakers would leave it out.
 4. distractors: exactly 5 other Thai sentences. Each distractor uses a different word that
    has a similar role or belongs to the same group as ${w.thai} (for "godson": nephew,
    uncle, older brother, cousin, godfather). Use a similar sentence pattern, but vary the
    time word and the verb a little in some sentences (today / on Sunday / tomorrow, forgot to
    visit / will go and see). One or two distractors may keep the exact pattern of the correct
-   sentence and change only the tested word. No distractor may contain ${w.thai}, and no
+   sentence and change only the tested word. The distractors follow the same rules for ผม
+   and ครับ. No distractor may contain ${w.thai}, and no
    distractor may also be a correct translation of sentence_en.
 
 For every Thai sentence, give an English translation, and split the sentence into words
-(for example เมื่อวาน | ฉัน | ไป | หา | ลูกทูนหัว). For each word, give its romanization.
+(for example เมื่อวาน | ผม | ไป | หา | ลูกทูนหัว). For each word, give its romanization.
 The Thai words, joined without spaces, must give the full sentence exactly. Romanize each
 word syllable by syllable, with the real spoken tone and vowel length.
 
