@@ -8,8 +8,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -90,7 +88,6 @@ import java.util.Locale
 /** Part of the screen height that the writing box takes. */
 private const val PAD_HEIGHT = 0.195f
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BooxScreen(vm: BooxViewModel = viewModel()) {
     val entries by vm.entries.collectAsStateWithLifecycle()
@@ -114,7 +111,10 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
     // Search box and label filter of the list. Both are forgotten when the app closes.
     var query by rememberSaveable { mutableStateOf("") }
     var labelFilter by rememberSaveable { mutableStateOf<String?>(null) }
-    val keyboardOpen = WindowInsets.isImeVisible
+    // BooxContent reports the keyboard from the height of the screen area. On this tablet
+    // (Android 11), WindowInsets.isImeVisible stays true after the Back button closed the
+    // keyboard, and pen input then stayed off (build 53 and 54).
+    var keyboardOpen by remember { mutableStateOf(false) }
 
     LifecycleResumeEffect(Unit) {
         vm.recheckContext()
@@ -136,6 +136,7 @@ fun BooxScreen(vm: BooxViewModel = viewModel()) {
         labelFilter = labelFilter,
         onLabelFilter = { labelFilter = it },
         keyboardOpen = keyboardOpen,
+        onKeyboardOpen = { keyboardOpen = it },
         connected = supabase.connected,
         syncError = supabase.lastError,
         captureContext = captureContext,
@@ -224,6 +225,7 @@ fun BooxContent(
     labelFilter: String?,
     onLabelFilter: (String?) -> Unit,
     keyboardOpen: Boolean,
+    onKeyboardOpen: (Boolean) -> Unit,
     connected: Boolean,
     syncError: String?,
     captureContext: CaptureContext,
@@ -251,6 +253,12 @@ fun BooxContent(
             .safeDrawingPadding()
     ) {
         val padHeight = maxHeight * PAD_HEIGHT
+        // The window becomes lower while the keyboard is open (adjustResize). The largest
+        // height seen so far is the height without the keyboard.
+        val fullHeight = remember { floatArrayOf(0f) }
+        if (maxHeight.value > fullHeight[0]) fullHeight[0] = maxHeight.value
+        val lowered = maxHeight.value < fullHeight[0] * 0.85f
+        LaunchedEffect(lowered) { onKeyboardOpen(lowered) }
         Column(Modifier.fillMaxSize()) {
             if (updateBuild != null) UpdateBanner(updateBuild, updateProgress, onUpdateClick)
             SyncBar(connected, entries.count { it.dirty }, syncError, onSyncBarClick)

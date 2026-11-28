@@ -10,6 +10,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.ViewTreeObserver
 import com.onyx.android.sdk.data.note.TouchPoint
 import com.onyx.android.sdk.pen.RawInputCallback
 import com.onyx.android.sdk.pen.TouchHelper
@@ -109,8 +110,51 @@ class InkView(
     fun setActive(value: Boolean) {
         if (active == value) return
         active = value
-        touchHelper?.setRawDrawingEnabled(value)
-        if (!value) redraw()
+        if (value) {
+            // The box can be at another place than before (the keyboard moved it), so the
+            // pen library gets the area again. post: the layout is complete at that time.
+            post { applyRegion() }
+        } else {
+            touchHelper?.setRawDrawingEnabled(false)
+            redraw()
+        }
+    }
+
+    private val screenPlace = IntArray(2)
+    private var regionPlace: Rect? = null
+
+    /**
+     * Gives the pen library the area of this view where the pen draws, and switches pen
+     * input on when [active] is true. The library keeps the area as a place on the screen,
+     * so this function must run again each time the view moves or changes its size.
+     */
+    private fun applyRegion() {
+        val helper = touchHelper ?: return
+        if (width == 0 || height == 0) return
+        getLocationOnScreen(screenPlace)
+        regionPlace = Rect(screenPlace[0], screenPlace[1], screenPlace[0] + width, screenPlace[1] + height)
+        helper.setRawDrawingEnabled(false)
+        helper.setLimitRect(Rect(0, 0, width, height), emptyList())
+        if (active) helper.setRawDrawingEnabled(true)
+        Log.i("InkView", "pen area $regionPlace, pen input ${if (active) "on" else "off"}")
+    }
+
+    /** Runs after each layout of the window: applies the area again when the view moved. */
+    private val onLayout = ViewTreeObserver.OnGlobalLayoutListener {
+        if (touchHelper == null || !active) return@OnGlobalLayoutListener
+        getLocationOnScreen(screenPlace)
+        val now = Rect(screenPlace[0], screenPlace[1], screenPlace[0] + width, screenPlace[1] + height)
+        if (now != regionPlace) applyRegion()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        viewTreeObserver.addOnGlobalLayoutListener(onLayout)
+    }
+
+    override fun onDetachedFromWindow() {
+        viewTreeObserver.removeOnGlobalLayoutListener(onLayout)
+        super.onDetachedFromWindow()
     }
 
     private fun add(stroke: Stroke) {
@@ -162,8 +206,7 @@ class InkView(
             TouchHelper.create(this, callback).apply {
                 setLimitRect(Rect(0, 0, width, height), emptyList())
                 openRawDrawing()
-                setRawDrawingEnabled(active)
-            }.also { touchHelper = it; applyPenStyle() }
+            }.also { touchHelper = it; applyPenStyle(); applyRegion() }
         } catch (e: Throwable) {
             Log.i("InkView", "Onyx pen library is not available; using normal touch events", e)
             null
@@ -173,10 +216,16 @@ class InkView(
     override fun surfaceCreated(holder: SurfaceHolder) = Unit
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        touchHelper?.closeRawDrawing()
-        touchHelper = null
-        redraw()
-        startOnyx()
+        // The keyboard of the search box changes the height of this view several times in
+        // a short time. One pen reader stays open for the whole life of the surface: closing
+        // and opening a reader for each change left the pen input dead (build 53 and 54).
+        if (touchHelper == null) {
+            redraw()
+            startOnyx()
+        } else {
+            applyRegion()
+            redraw()
+        }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
